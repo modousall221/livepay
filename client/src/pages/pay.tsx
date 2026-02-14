@@ -4,7 +4,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Radio, Shield, Clock, CheckCircle2, XCircle, Loader2 } from "lucide-react";
+import { Radio, Shield, Clock, CheckCircle2, XCircle, Loader2, CreditCard, Smartphone, Banknote } from "lucide-react";
 import { useRoute } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { useState, useEffect } from "react";
@@ -20,12 +20,34 @@ type PaymentInvoice = {
   vendorName: string;
 };
 
+type PaymentMethod = {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+};
+
+const methodIcons: Record<string, typeof Smartphone> = {
+  wave: Smartphone,
+  orange: Smartphone,
+  card: CreditCard,
+  cash: Banknote,
+};
+
+const methodColors: Record<string, string> = {
+  wave: "text-blue-500",
+  orange_money: "text-orange-500",
+  card: "text-violet-500",
+  cash: "text-green-500",
+};
+
 export default function Pay() {
   const [, params] = useRoute("/pay/:token");
   const { toast } = useToast();
   const token = params?.token;
   const [timeLeft, setTimeLeft] = useState("");
   const [expired, setExpired] = useState(false);
+  const [selectedMethod, setSelectedMethod] = useState<string>("wave");
 
   const { data: invoice, isLoading, error } = useQuery<PaymentInvoice>({
     queryKey: ["/api/pay", token],
@@ -38,6 +60,15 @@ export default function Pay() {
     refetchInterval: 5000,
   });
 
+  const { data: methods } = useQuery<PaymentMethod[]>({
+    queryKey: ["/api/payment-methods"],
+    queryFn: async () => {
+      const res = await fetch("/api/payment-methods");
+      if (!res.ok) throw new Error(`${res.status}`);
+      return res.json();
+    },
+  });
+
   useEffect(() => {
     if (!invoice?.expiresAt || invoice.status !== "pending") return;
 
@@ -47,7 +78,7 @@ export default function Pay() {
       const diff = exp - now;
 
       if (diff <= 0) {
-        setTimeLeft("Expir\u00e9");
+        setTimeLeft("Expire");
         setExpired(true);
         clearInterval(interval);
         return;
@@ -62,10 +93,10 @@ export default function Pay() {
   }, [invoice?.expiresAt, invoice?.status]);
 
   const payMutation = useMutation({
-    mutationFn: () => apiRequest("POST", `/api/pay/${token}`),
+    mutationFn: () => apiRequest("POST", `/api/pay/${token}`, { paymentMethod: selectedMethod }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/pay", token] });
-      toast({ title: "Paiement effectu\u00e9" });
+      toast({ title: "Paiement effectue" });
     },
     onError: (error: Error) => {
       toast({ title: "Erreur de paiement", description: error.message, variant: "destructive" });
@@ -92,7 +123,7 @@ export default function Pay() {
           <XCircle className="w-6 h-6 text-destructive" />
         </div>
         <p className="text-muted-foreground text-center">
-          Ce lien de paiement est invalide ou a expir&eacute;.
+          Ce lien de paiement est invalide ou a expire.
         </p>
       </div>
     );
@@ -140,7 +171,7 @@ export default function Pay() {
                   <CheckCircle2 className="w-7 h-7 text-green-500" />
                 </div>
                 <div className="text-center">
-                  <p className="font-semibold text-green-500">Paiement confirm&eacute;</p>
+                  <p className="font-semibold text-green-500">Paiement confirme</p>
                   <p className="text-xs text-muted-foreground mt-1">Merci pour votre achat</p>
                 </div>
               </div>
@@ -152,7 +183,7 @@ export default function Pay() {
                   <XCircle className="w-7 h-7 text-destructive" />
                 </div>
                 <div className="text-center">
-                  <p className="font-semibold text-destructive">Lien expir&eacute;</p>
+                  <p className="font-semibold text-destructive">Lien expire</p>
                   <p className="text-xs text-muted-foreground mt-1">Contactez le vendeur pour un nouveau lien</p>
                 </div>
               </div>
@@ -166,6 +197,37 @@ export default function Pay() {
                     Expire dans {timeLeft}
                   </span>
                 </div>
+
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-muted-foreground">Mode de paiement</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {(methods || [
+                      { id: "wave", name: "Wave", description: "Paiement mobile", icon: "wave" },
+                      { id: "orange_money", name: "Orange Money", description: "Paiement mobile", icon: "orange" },
+                      { id: "card", name: "Carte bancaire", description: "Visa / Mastercard", icon: "card" },
+                      { id: "cash", name: "Especes", description: "Main propre", icon: "cash" },
+                    ]).map((method) => {
+                      const IconComponent = methodIcons[method.icon] || Smartphone;
+                      const isSelected = selectedMethod === method.id;
+                      return (
+                        <button
+                          key={method.id}
+                          onClick={() => setSelectedMethod(method.id)}
+                          className={`relative flex flex-col items-center gap-1.5 p-3 rounded-md border-2 transition-colors ${
+                            isSelected
+                              ? "border-primary bg-primary/5"
+                              : "border-border hover-elevate"
+                          }`}
+                          data-testid={`button-method-${method.id}`}
+                        >
+                          <IconComponent className={`w-5 h-5 ${methodColors[method.id] || "text-foreground"}`} />
+                          <span className="text-xs font-medium">{method.name}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
                 <Button
                   className="w-full"
                   size="lg"
@@ -179,7 +241,7 @@ export default function Pay() {
                       Traitement...
                     </>
                   ) : (
-                    "Payer maintenant"
+                    `Payer avec ${(methods || []).find(m => m.id === selectedMethod)?.name || selectedMethod}`
                   )}
                 </Button>
               </>
@@ -188,7 +250,7 @@ export default function Pay() {
 
           <div className="flex items-center justify-center gap-3 text-xs text-muted-foreground">
             <Shield className="w-3 h-3" />
-            <span>Paiement s&eacute;curis&eacute; &middot; Zone UEMOA</span>
+            <span>Paiement securise - Zone UEMOA</span>
           </div>
         </div>
       </main>

@@ -27,7 +27,7 @@ export interface IStorage {
   getInvoicesByVendor(vendorId: string, sessionId?: string): Promise<Invoice[]>;
   getInvoiceByToken(token: string): Promise<Invoice | undefined>;
   createInvoice(vendorId: string, data: InsertInvoice): Promise<Invoice>;
-  updateInvoiceStatus(id: string, status: string): Promise<Invoice | undefined>;
+  updateInvoiceStatus(id: string, status: string, paymentMethod?: string, providerRef?: string): Promise<Invoice | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -109,10 +109,16 @@ export class DatabaseStorage implements IStorage {
     return invoice;
   }
 
-  async updateInvoiceStatus(id: string, status: string): Promise<Invoice | undefined> {
+  async updateInvoiceStatus(id: string, status: string, paymentMethod?: string, providerRef?: string): Promise<Invoice | undefined> {
     const updateData: Record<string, any> = { status };
     if (status === "paid") {
       updateData.paidAt = new Date();
+    }
+    if (paymentMethod) {
+      updateData.paymentMethod = paymentMethod;
+    }
+    if (providerRef) {
+      updateData.paymentProviderRef = providerRef;
     }
     const [invoice] = await db.update(invoices).set(updateData).where(eq(invoices.id, id)).returning();
     return invoice;

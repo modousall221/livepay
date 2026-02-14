@@ -19,20 +19,22 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { insertInvoiceSchema, type Invoice, type Product, type LiveSession } from "@shared/schema";
-import { Plus, Radio, Copy, ExternalLink, ArrowLeft, RefreshCw } from "lucide-react";
+import { Plus, Radio, Copy, ExternalLink, ArrowLeft, RefreshCw, QrCode, MessageCircle, Check } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { isUnauthorizedError } from "@/lib/auth-utils";
 import { useState, useEffect, useCallback } from "react";
 import { useRoute, useLocation } from "wouter";
 import { z } from "zod";
+import { QRCodeDisplay, InlineQR } from "@/components/qr-code";
 
 const invoiceFormSchema = z.object({
   clientName: z.string().min(1, "Nom du client requis"),
-  clientPhone: z.string().min(1, "T\u00e9l\u00e9phone requis"),
+  clientPhone: z.string().min(1, "Telephone requis"),
   productId: z.string().min(1, "Produit requis"),
   productName: z.string(),
   amount: z.number().min(1, "Montant requis"),
@@ -57,10 +59,10 @@ function StatusDot({ status }: { status: string }) {
 
 function StatusLabel({ status }: { status: string }) {
   const labels: Record<string, string> = {
-    paid: "Pay\u00e9",
+    paid: "Paye",
     pending: "En attente",
-    expired: "Expir\u00e9",
-    cancelled: "Annul\u00e9",
+    expired: "Expire",
+    cancelled: "Annule",
   };
   const variants: Record<string, "default" | "secondary" | "destructive"> = {
     paid: "default",
@@ -75,11 +77,32 @@ function StatusLabel({ status }: { status: string }) {
   );
 }
 
+function ShareWhatsApp({ token, clientName, productName, amount }: {
+  token: string;
+  clientName: string;
+  productName: string;
+  amount: number;
+}) {
+  const payUrl = `${window.location.origin}/pay/${token}`;
+  const message = `Bonjour ${clientName}, voici votre lien de paiement LivePay pour "${productName}" (${amount.toLocaleString("fr-FR")} FCFA):\n${payUrl}\n\nCe lien expire dans 15 minutes.`;
+  const waUrl = `https://wa.me/?text=${encodeURIComponent(message)}`;
+
+  return (
+    <a href={waUrl} target="_blank" rel="noopener noreferrer">
+      <Button size="icon" variant="ghost" data-testid={`button-whatsapp-${token}`}>
+        <MessageCircle className="w-4 h-4 text-green-500" />
+      </Button>
+    </a>
+  );
+}
+
 export default function SessionLive() {
   const { toast } = useToast();
   const [, params] = useRoute("/sessions/:id");
   const [, navigate] = useLocation();
   const [invoiceOpen, setInvoiceOpen] = useState(false);
+  const [qrDialogToken, setQrDialogToken] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
   const sessionId = params?.id;
 
   const { data: session, isLoading: loadingSession } = useQuery<LiveSession>({
@@ -129,16 +152,26 @@ export default function SessionLive() {
   const createInvoiceMutation = useMutation({
     mutationFn: (data: InvoiceFormData) =>
       apiRequest("POST", "/api/invoices", { ...data, sessionId }),
-    onSuccess: () => {
+    onSuccess: async (res) => {
       queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
       queryClient.invalidateQueries({ queryKey: ["/api/invoices", sessionId] });
       form.reset({ clientName: "", clientPhone: "", productId: "", productName: "", amount: 0, sessionId });
       setInvoiceOpen(false);
-      toast({ title: "Facture g\u00e9n\u00e9r\u00e9e" });
+
+      try {
+        const invoice = await res.json();
+        if (invoice?.token) {
+          const url = `${window.location.origin}/pay/${invoice.token}`;
+          await navigator.clipboard.writeText(url);
+          toast({ title: "Facture generee", description: "Lien copie dans le presse-papier" });
+          return;
+        }
+      } catch {}
+      toast({ title: "Facture generee" });
     },
     onError: (error: Error) => {
       if (isUnauthorizedError(error)) {
-        toast({ title: "Non autoris\u00e9", description: "Reconnexion...", variant: "destructive" });
+        toast({ title: "Non autorise", description: "Reconnexion...", variant: "destructive" });
         setTimeout(() => { window.location.href = "/api/login"; }, 500);
         return;
       }
@@ -146,10 +179,12 @@ export default function SessionLive() {
     },
   });
 
-  const copyLink = useCallback((token: string) => {
+  const copyLink = useCallback((token: string, invoiceId: string) => {
     const url = `${window.location.origin}/pay/${token}`;
     navigator.clipboard.writeText(url);
-    toast({ title: "Lien copi\u00e9" });
+    setCopiedId(invoiceId);
+    toast({ title: "Lien copie" });
+    setTimeout(() => setCopiedId(null), 2000);
   }, [toast]);
 
   const onSubmit = (data: InvoiceFormData) => {
@@ -178,13 +213,15 @@ export default function SessionLive() {
   if (!session) {
     return (
       <div className="p-4 md:p-6 max-w-5xl">
-        <p className="text-muted-foreground">Session non trouv&eacute;e.</p>
+        <p className="text-muted-foreground">Session non trouvee.</p>
         <Button variant="ghost" onClick={() => navigate("/sessions")} className="mt-4">
           <ArrowLeft className="w-4 h-4 mr-2" /> Retour
         </Button>
       </div>
     );
   }
+
+  const qrInvoice = qrDialogToken ? sessionInvoices.find((i) => i.token === qrDialogToken) : null;
 
   return (
     <div className="p-4 md:p-6 space-y-6 max-w-5xl">
@@ -209,7 +246,7 @@ export default function SessionLive() {
                   En direct
                 </span>
               ) : (
-                <Badge variant="secondary" className="text-xs">Termin&eacute;e</Badge>
+                <Badge variant="secondary" className="text-xs">Terminee</Badge>
               )}
             </div>
             <p className="text-xs text-muted-foreground capitalize">{session.platform}</p>
@@ -227,6 +264,7 @@ export default function SessionLive() {
             <DialogContent>
               <DialogHeader>
                 <DialogTitle>Facture rapide</DialogTitle>
+                <DialogDescription>Le lien sera copie automatiquement</DialogDescription>
               </DialogHeader>
               <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
                 <div className="space-y-2">
@@ -266,7 +304,7 @@ export default function SessionLive() {
                     )}
                   </div>
                   <div className="space-y-2">
-                    <Label>T&eacute;l&eacute;phone</Label>
+                    <Label>Telephone</Label>
                     <Input
                       {...form.register("clientPhone")}
                       placeholder="+221 77 123 4567"
@@ -292,7 +330,7 @@ export default function SessionLive() {
                   disabled={createInvoiceMutation.isPending}
                   data-testid="button-submit-invoice"
                 >
-                  {createInvoiceMutation.isPending ? "G\u00e9n\u00e9ration..." : "G\u00e9n\u00e9rer le lien de paiement"}
+                  {createInvoiceMutation.isPending ? "Generation..." : "Generer le lien de paiement"}
                 </Button>
               </form>
             </DialogContent>
@@ -308,7 +346,7 @@ export default function SessionLive() {
           </p>
         </Card>
         <Card className="p-4 text-center">
-          <p className="text-xs text-muted-foreground mb-1">Pay&eacute;es</p>
+          <p className="text-xs text-muted-foreground mb-1">Payees</p>
           <p className="text-lg font-bold" data-testid="text-session-paid">{paidCount}</p>
         </Card>
         <Card className="p-4 text-center">
@@ -372,10 +410,28 @@ export default function SessionLive() {
                       <Button
                         size="icon"
                         variant="ghost"
-                        onClick={() => copyLink(invoice.token)}
+                        onClick={() => copyLink(invoice.token, invoice.id)}
                         data-testid={`button-copy-link-${invoice.id}`}
                       >
-                        <Copy className="w-4 h-4" />
+                        {copiedId === invoice.id ? (
+                          <Check className="w-4 h-4 text-green-500" />
+                        ) : (
+                          <Copy className="w-4 h-4" />
+                        )}
+                      </Button>
+                      <ShareWhatsApp
+                        token={invoice.token}
+                        clientName={invoice.clientName}
+                        productName={invoice.productName}
+                        amount={invoice.amount}
+                      />
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        onClick={() => setQrDialogToken(invoice.token)}
+                        data-testid={`button-qr-${invoice.id}`}
+                      >
+                        <QrCode className="w-4 h-4" />
                       </Button>
                       <a href={`/pay/${invoice.token}`} target="_blank" rel="noopener noreferrer">
                         <Button size="icon" variant="ghost" data-testid={`button-open-link-${invoice.id}`}>
@@ -390,6 +446,52 @@ export default function SessionLive() {
           </div>
         )}
       </div>
+
+      <Dialog open={!!qrDialogToken} onOpenChange={(open) => !open && setQrDialogToken(null)}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>QR Code de paiement</DialogTitle>
+            <DialogDescription>
+              {qrInvoice ? `${qrInvoice.clientName} - ${qrInvoice.amount.toLocaleString("fr-FR")} F` : ""}
+            </DialogDescription>
+          </DialogHeader>
+          {qrDialogToken && (
+            <div className="flex flex-col items-center gap-4 py-4">
+              <QRCodeDisplay
+                url={`${window.location.origin}/pay/${qrDialogToken}`}
+                size={240}
+                showDownload
+                label="Scannez pour payer"
+              />
+              <div className="flex gap-2 w-full">
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  onClick={() => {
+                    navigator.clipboard.writeText(`${window.location.origin}/pay/${qrDialogToken}`);
+                    toast({ title: "Lien copie" });
+                  }}
+                  data-testid="button-copy-qr-link"
+                >
+                  <Copy className="w-4 h-4 mr-2" />
+                  Copier le lien
+                </Button>
+                <a
+                  href={`${window.location.origin}/qr/${qrDialogToken}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex-1"
+                >
+                  <Button variant="outline" className="w-full" data-testid="button-open-overlay">
+                    <ExternalLink className="w-4 h-4 mr-2" />
+                    Overlay OBS
+                  </Button>
+                </a>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

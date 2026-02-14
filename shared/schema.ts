@@ -7,6 +7,7 @@ export * from "./models/auth";
 import { users } from "./models/auth";
 
 export const invoiceStatusEnum = pgEnum("invoice_status", ["pending", "paid", "expired", "cancelled"]);
+export const paymentMethodEnum = pgEnum("payment_method", ["wave", "orange_money", "card", "cash"]);
 
 export const products = pgTable("products", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -41,6 +42,8 @@ export const invoices = pgTable("invoices", {
   status: invoiceStatusEnum("status").default("pending").notNull(),
   token: text("token").notNull().unique(),
   expiresAt: timestamp("expires_at").notNull(),
+  paymentMethod: paymentMethodEnum("payment_method"),
+  paymentProviderRef: text("payment_provider_ref"),
   paidAt: timestamp("paid_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
@@ -79,6 +82,8 @@ export const insertInvoiceSchema = createInsertSchema(invoices).omit({
   vendorId: true,
   token: true,
   status: true,
+  paymentMethod: true,
+  paymentProviderRef: true,
   paidAt: true,
   createdAt: true,
   expiresAt: true,

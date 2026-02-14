@@ -17,6 +17,7 @@ import Sessions from "@/pages/sessions";
 import SessionLive from "@/pages/session-live";
 import Invoices from "@/pages/invoices";
 import Pay from "@/pages/pay";
+import QROverlay from "@/pages/qr-overlay";
 
 function AuthenticatedRouter() {
   const style = {
@@ -66,6 +67,7 @@ function AppRouter() {
   return (
     <Switch>
       <Route path="/pay/:token" component={Pay} />
+      <Route path="/qr/:token" component={QROverlay} />
       <Route>
         {user ? <AuthenticatedRouter /> : <Landing />}
       </Route>

@@ -4,6 +4,7 @@ import { storage } from "./storage";
 import { setupAuth, registerAuthRoutes, isAuthenticated } from "./replit_integrations/auth";
 import { authStorage } from "./replit_integrations/auth/storage";
 import { insertProductSchema, insertLiveSessionSchema, insertInvoiceSchema } from "@shared/schema";
+import { getPaymentProvider, getAvailableProviders } from "./payment-providers";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -136,6 +137,63 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/pay/:token", async (req, res, next) => {
+    const ua = (req.headers["user-agent"] || "").toLowerCase();
+    const isCrawler = /bot|crawl|spider|facebook|whatsapp|telegram|twitter|slack|discord|linkedin|preview/i.test(ua);
+    if (!isCrawler) {
+      return next();
+    }
+
+    try {
+      const invoice = await storage.getInvoiceByToken(req.params.token);
+      if (!invoice) {
+        return next();
+      }
+
+      if (invoice.status === "pending" && new Date() > new Date(invoice.expiresAt)) {
+        await storage.updateInvoiceStatus(invoice.id, "expired");
+        invoice.status = "expired";
+      }
+
+      const vendor = await authStorage.getUser(invoice.vendorId);
+      const vendorName = vendor
+        ? `${vendor.firstName || ""} ${vendor.lastName || ""}`.trim() || vendor.email || "Vendeur"
+        : "Vendeur";
+
+      const statusText = invoice.status === "paid" ? "Paye" : invoice.status === "pending" ? "En attente" : "Expire";
+      const amountFormatted = invoice.amount.toLocaleString("fr-FR");
+      const title = `Payer ${amountFormatted} FCFA - ${invoice.productName}`;
+      const description = `Facture de ${vendorName} pour ${invoice.clientName}. ${invoice.productName} - ${amountFormatted} FCFA. Statut: ${statusText}`;
+
+      res.setHeader("Content-Type", "text/html");
+      res.send(`<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${title} | LivePay</title>
+  <meta name="description" content="${description}" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="${title}" />
+  <meta property="og:description" content="${description}" />
+  <meta property="og:site_name" content="LivePay" />
+  <meta property="og:url" content="${req.protocol}://${req.get("host")}/pay/${req.params.token}" />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="${title}" />
+  <meta name="twitter:description" content="${description}" />
+  <link rel="canonical" href="${req.protocol}://${req.get("host")}/pay/${req.params.token}" />
+</head>
+<body>
+  <h1>${title}</h1>
+  <p>${description}</p>
+  <p>Paiement securise par LivePay - Zone UEMOA</p>
+</body>
+</html>`);
+    } catch (error) {
+      next();
+    }
+  });
+
   app.get("/api/pay/:token", async (req, res) => {
     try {
       const invoice = await storage.getInvoiceByToken(req.params.token);
@@ -167,6 +225,10 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/payment-methods", async (_req, res) => {
+    res.json(getAvailableProviders());
+  });
+
   app.post("/api/pay/:token", async (req, res) => {
     try {
       const invoice = await storage.getInvoiceByToken(req.params.token);
@@ -183,11 +245,71 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Invoice expired" });
       }
 
-      const updated = await storage.updateInvoiceStatus(invoice.id, "paid");
+      const paymentMethod = req.body?.paymentMethod || "wave";
+      const provider = getPaymentProvider(paymentMethod);
+      if (!provider) {
+        return res.status(400).json({ message: "Methode de paiement invalide" });
+      }
+
+      const result = await provider.processPayment(invoice.id, invoice.amount, {
+        clientName: invoice.clientName,
+        clientPhone: invoice.clientPhone,
+        productName: invoice.productName,
+      });
+
+      if (!result.success) {
+        return res.status(400).json({ message: result.error || "Echec du paiement" });
+      }
+
+      const updated = await storage.updateInvoiceStatus(invoice.id, "paid", paymentMethod, result.providerRef);
       res.json({ success: true, invoice: updated });
     } catch (error) {
       console.error("Error processing payment:", error);
       res.status(500).json({ message: "Failed to process payment" });
+    }
+  });
+
+  app.get("/api/webhooks/whatsapp", (req, res) => {
+    const verifyToken = process.env.WHATSAPP_VERIFY_TOKEN || "livepay_webhook_verify";
+    const mode = req.query["hub.mode"];
+    const token = req.query["hub.verify_token"];
+    const challenge = req.query["hub.challenge"];
+
+    if (mode === "subscribe" && token === verifyToken) {
+      console.log("WhatsApp webhook verified");
+      return res.status(200).send(challenge);
+    }
+    res.sendStatus(403);
+  });
+
+  app.post("/api/webhooks/whatsapp", async (req, res) => {
+    try {
+      res.sendStatus(200);
+
+      const body = req.body;
+      if (!body?.entry) return;
+
+      for (const entry of body.entry) {
+        const changes = entry.changes || [];
+        for (const change of changes) {
+          if (change.field !== "messages") continue;
+          const messages = change.value?.messages || [];
+          for (const msg of messages) {
+            if (msg.type !== "text") continue;
+            const text = (msg.text?.body || "").trim().toLowerCase();
+            const from = msg.from;
+
+            const keywords = ["je prends", "je veux", "commander", "acheter", "payer"];
+            const matched = keywords.some((kw) => text.includes(kw));
+
+            if (matched) {
+              console.log(`[WhatsApp Bot] Order intent from ${from}: "${text}"`);
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error("WhatsApp webhook error:", error);
     }
   });
 

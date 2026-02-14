@@ -4,7 +4,7 @@ import { storage } from "./storage";
 import { setupAuth, registerAuthRoutes, isAuthenticated } from "./replit_integrations/auth";
 import { authStorage } from "./replit_integrations/auth/storage";
 import { insertProductSchema, insertLiveSessionSchema, insertInvoiceSchema } from "@shared/schema";
-import { getPaymentProvider, getAvailableProviders } from "./payment-providers";
+import { getPaymentProvider, getAvailableProviders, checkPaydunyaStatus } from "./payment-providers";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -215,6 +215,7 @@ export async function registerRoutes(
         clientName: invoice.clientName,
         status: invoice.status,
         expiresAt: invoice.expiresAt,
+        paymentMethod: invoice.paymentMethod,
         vendorName: vendor
           ? `${vendor.firstName || ""} ${vendor.lastName || ""}`.trim() || vendor.email || "Vendeur"
           : "Vendeur",
@@ -251,14 +252,41 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Methode de paiement invalide" });
       }
 
+      if (paymentMethod === "cash") {
+        const result = await provider.processPayment(invoice.id, invoice.amount, {
+          clientName: invoice.clientName,
+          clientPhone: invoice.clientPhone,
+          productName: invoice.productName,
+        });
+        const updated = await storage.updateInvoiceStatus(invoice.id, "paid", paymentMethod, result.providerRef);
+        return res.json({ success: true, invoice: updated });
+      }
+
       const result = await provider.processPayment(invoice.id, invoice.amount, {
         clientName: invoice.clientName,
         clientPhone: invoice.clientPhone,
         productName: invoice.productName,
+        invoiceToken: invoice.token,
       });
 
       if (!result.success) {
         return res.status(400).json({ message: result.error || "Echec du paiement" });
+      }
+
+      if (result.paydunyaToken && result.redirectUrl) {
+        await storage.updateInvoicePaydunya(
+          invoice.id,
+          result.paydunyaToken,
+          result.redirectUrl,
+          paymentMethod,
+          result.providerRef || ""
+        );
+        return res.json({
+          success: true,
+          redirect: true,
+          redirectUrl: result.redirectUrl,
+          paydunyaToken: result.paydunyaToken,
+        });
       }
 
       const updated = await storage.updateInvoiceStatus(invoice.id, "paid", paymentMethod, result.providerRef);
@@ -266,6 +294,81 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error processing payment:", error);
       res.status(500).json({ message: "Failed to process payment" });
+    }
+  });
+
+  app.post("/api/paydunya/ipn", async (req, res) => {
+    try {
+      res.sendStatus(200);
+
+      const data = req.body?.data;
+      if (!data) return;
+
+      const paydunyaToken = data.invoice?.token;
+      const status = data.status;
+      const customData = data.custom_data || {};
+      const livepayToken = customData.livepay_token;
+
+      console.log(`[PayDunia IPN] Token: ${paydunyaToken}, Status: ${status}`);
+
+      if (!paydunyaToken) return;
+
+      let invoice = await storage.getInvoiceByPaydunyaToken(paydunyaToken);
+      if (!invoice && livepayToken) {
+        invoice = await storage.getInvoiceByToken(livepayToken);
+      }
+      if (!invoice) {
+        console.error(`[PayDunia IPN] No invoice found for token: ${paydunyaToken}`);
+        return;
+      }
+
+      if (invoice.status === "paid") return;
+
+      if (status === "completed") {
+        await storage.updateInvoiceStatus(
+          invoice.id,
+          "paid",
+          invoice.paymentMethod || "wave",
+          `PDY-${paydunyaToken}`
+        );
+        console.log(`[PayDunia IPN] Invoice ${invoice.id} marked as paid`);
+      } else if (status === "cancelled" || status === "failed") {
+        console.log(`[PayDunia IPN] Invoice ${invoice.id} payment ${status}`);
+      }
+    } catch (error) {
+      console.error("[PayDunia IPN] Error:", error);
+    }
+  });
+
+  app.get("/api/pay/:token/status", async (req, res) => {
+    try {
+      const invoice = await storage.getInvoiceByToken(req.params.token);
+      if (!invoice) {
+        return res.status(404).json({ message: "Invoice not found" });
+      }
+
+      if (invoice.status === "pending" && new Date() > new Date(invoice.expiresAt)) {
+        await storage.updateInvoiceStatus(invoice.id, "expired");
+        return res.json({ status: "expired" });
+      }
+
+      if (invoice.status === "pending" && invoice.paydunyaToken) {
+        const pdStatus = await checkPaydunyaStatus(invoice.paydunyaToken);
+        if (pdStatus.status === "paid") {
+          await storage.updateInvoiceStatus(
+            invoice.id,
+            "paid",
+            invoice.paymentMethod || "wave",
+            `PDY-${invoice.paydunyaToken}`
+          );
+          return res.json({ status: "paid" });
+        }
+      }
+
+      res.json({ status: invoice.status });
+    } catch (error) {
+      console.error("Error checking status:", error);
+      res.status(500).json({ message: "Failed to check status" });
     }
   });
 

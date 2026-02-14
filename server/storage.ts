@@ -26,8 +26,10 @@ export interface IStorage {
 
   getInvoicesByVendor(vendorId: string, sessionId?: string): Promise<Invoice[]>;
   getInvoiceByToken(token: string): Promise<Invoice | undefined>;
+  getInvoiceByPaydunyaToken(paydunyaToken: string): Promise<Invoice | undefined>;
   createInvoice(vendorId: string, data: InsertInvoice): Promise<Invoice>;
   updateInvoiceStatus(id: string, status: string, paymentMethod?: string, providerRef?: string): Promise<Invoice | undefined>;
+  updateInvoicePaydunya(id: string, paydunyaToken: string, paydunyaUrl: string, paymentMethod: string, providerRef: string): Promise<Invoice | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -121,6 +123,20 @@ export class DatabaseStorage implements IStorage {
       updateData.paymentProviderRef = providerRef;
     }
     const [invoice] = await db.update(invoices).set(updateData).where(eq(invoices.id, id)).returning();
+    return invoice;
+  }
+
+  async getInvoiceByPaydunyaToken(paydunyaToken: string): Promise<Invoice | undefined> {
+    const [invoice] = await db.select().from(invoices).where(eq(invoices.paydunyaToken, paydunyaToken));
+    return invoice;
+  }
+
+  async updateInvoicePaydunya(id: string, paydunyaToken: string, paydunyaUrl: string, paymentMethod: string, providerRef: string): Promise<Invoice | undefined> {
+    const [invoice] = await db
+      .update(invoices)
+      .set({ paydunyaToken, paydunyaUrl, paymentMethod: paymentMethod as any, paymentProviderRef: providerRef })
+      .where(eq(invoices.id, id))
+      .returning();
     return invoice;
   }
 }

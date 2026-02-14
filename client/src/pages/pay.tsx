@@ -2,10 +2,9 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Radio, Shield, Clock, CheckCircle2, XCircle, Loader2, CreditCard, Smartphone, Banknote } from "lucide-react";
-import { useRoute } from "wouter";
+import { Radio, Shield, Clock, CheckCircle2, XCircle, Loader2, CreditCard, Smartphone, Banknote, ExternalLink } from "lucide-react";
+import { useRoute, useSearch } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { useState, useEffect } from "react";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -45,9 +44,14 @@ export default function Pay() {
   const [, params] = useRoute("/pay/:token");
   const { toast } = useToast();
   const token = params?.token;
+  const searchString = useSearch();
+  const urlParams = new URLSearchParams(searchString);
+  const returnStatus = urlParams.get("status");
   const [timeLeft, setTimeLeft] = useState("");
   const [expired, setExpired] = useState(false);
   const [selectedMethod, setSelectedMethod] = useState<string>("wave");
+  const [redirecting, setRedirecting] = useState(false);
+  const [waitingPayment, setWaitingPayment] = useState(false);
 
   const { data: invoice, isLoading, error } = useQuery<PaymentInvoice>({
     queryKey: ["/api/pay", token],
@@ -57,7 +61,7 @@ export default function Pay() {
       return res.json();
     },
     enabled: !!token,
-    refetchInterval: 5000,
+    refetchInterval: waitingPayment ? 3000 : 5000,
   });
 
   const { data: methods } = useQuery<PaymentMethod[]>({
@@ -68,6 +72,19 @@ export default function Pay() {
       return res.json();
     },
   });
+
+  useEffect(() => {
+    if (returnStatus === "completed" && token) {
+      setWaitingPayment(true);
+    }
+  }, [returnStatus, token]);
+
+  useEffect(() => {
+    if (waitingPayment && invoice?.status === "paid") {
+      setWaitingPayment(false);
+      toast({ title: "Paiement confirme" });
+    }
+  }, [waitingPayment, invoice?.status, toast]);
 
   useEffect(() => {
     if (!invoice?.expiresAt || invoice.status !== "pending") return;
@@ -93,10 +110,18 @@ export default function Pay() {
   }, [invoice?.expiresAt, invoice?.status]);
 
   const payMutation = useMutation({
-    mutationFn: () => apiRequest("POST", `/api/pay/${token}`, { paymentMethod: selectedMethod }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/pay", token] });
-      toast({ title: "Paiement effectue" });
+    mutationFn: async () => {
+      const res = await apiRequest("POST", `/api/pay/${token}`, { paymentMethod: selectedMethod });
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      if (data.redirect && data.redirectUrl) {
+        setRedirecting(true);
+        window.location.href = data.redirectUrl;
+      } else {
+        queryClient.invalidateQueries({ queryKey: ["/api/pay", token] });
+        toast({ title: "Paiement effectue" });
+      }
     },
     onError: (error: Error) => {
       toast({ title: "Erreur de paiement", description: error.message, variant: "destructive" });
@@ -189,7 +214,17 @@ export default function Pay() {
               </div>
             )}
 
-            {isPending && (
+            {waitingPayment && isPending && (
+              <div className="flex flex-col items-center gap-3 py-4">
+                <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                <div className="text-center">
+                  <p className="font-semibold">Verification du paiement...</p>
+                  <p className="text-xs text-muted-foreground mt-1">Veuillez patienter pendant la confirmation</p>
+                </div>
+              </div>
+            )}
+
+            {isPending && !waitingPayment && (
               <>
                 <div className="flex items-center justify-center gap-2 text-amber-500">
                   <Clock className="w-4 h-4" />
@@ -232,10 +267,15 @@ export default function Pay() {
                   className="w-full"
                   size="lg"
                   onClick={() => payMutation.mutate()}
-                  disabled={payMutation.isPending}
+                  disabled={payMutation.isPending || redirecting}
                   data-testid="button-pay"
                 >
-                  {payMutation.isPending ? (
+                  {redirecting ? (
+                    <>
+                      <ExternalLink className="w-4 h-4 mr-2" />
+                      Redirection vers le paiement...
+                    </>
+                  ) : payMutation.isPending ? (
                     <>
                       <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                       Traitement...
@@ -244,13 +284,19 @@ export default function Pay() {
                     `Payer avec ${(methods || []).find(m => m.id === selectedMethod)?.name || selectedMethod}`
                   )}
                 </Button>
+
+                {selectedMethod !== "cash" && (
+                  <p className="text-[10px] text-center text-muted-foreground">
+                    Vous serez redirige vers la plateforme de paiement securisee PayDunya
+                  </p>
+                )}
               </>
             )}
           </Card>
 
           <div className="flex items-center justify-center gap-3 text-xs text-muted-foreground">
             <Shield className="w-3 h-3" />
-            <span>Paiement securise - Zone UEMOA</span>
+            <span>Paiement securise par PayDunya - Zone UEMOA</span>
           </div>
         </div>
       </main>

@@ -26,10 +26,10 @@ export interface IStorage {
 
   getInvoicesByVendor(vendorId: string, sessionId?: string): Promise<Invoice[]>;
   getInvoiceByToken(token: string): Promise<Invoice | undefined>;
-  getInvoiceByPaydunyaToken(paydunyaToken: string): Promise<Invoice | undefined>;
+  getInvoiceByChargeId(chargeId: string): Promise<Invoice | undefined>;
   createInvoice(vendorId: string, data: InsertInvoice): Promise<Invoice>;
   updateInvoiceStatus(id: string, status: string, paymentMethod?: string, providerRef?: string): Promise<Invoice | undefined>;
-  updateInvoicePaydunya(id: string, paydunyaToken: string, paydunyaUrl: string, paymentMethod: string, providerRef: string): Promise<Invoice | undefined>;
+  updateInvoiceBictorys(id: string, chargeId: string, checkoutUrl: string, paymentMethod: string, providerRef: string): Promise<Invoice | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -126,15 +126,15 @@ export class DatabaseStorage implements IStorage {
     return invoice;
   }
 
-  async getInvoiceByPaydunyaToken(paydunyaToken: string): Promise<Invoice | undefined> {
-    const [invoice] = await db.select().from(invoices).where(eq(invoices.paydunyaToken, paydunyaToken));
+  async getInvoiceByChargeId(chargeId: string): Promise<Invoice | undefined> {
+    const [invoice] = await db.select().from(invoices).where(eq(invoices.bictorysChargeId, chargeId));
     return invoice;
   }
 
-  async updateInvoicePaydunya(id: string, paydunyaToken: string, paydunyaUrl: string, paymentMethod: string, providerRef: string): Promise<Invoice | undefined> {
+  async updateInvoiceBictorys(id: string, chargeId: string, checkoutUrl: string, paymentMethod: string, providerRef: string): Promise<Invoice | undefined> {
     const [invoice] = await db
       .update(invoices)
-      .set({ paydunyaToken, paydunyaUrl, paymentMethod: paymentMethod as any, paymentProviderRef: providerRef })
+      .set({ bictorysChargeId: chargeId, bictorysCheckoutUrl: checkoutUrl, paymentMethod: paymentMethod as any, paymentProviderRef: providerRef })
       .where(eq(invoices.id, id))
       .returning();
     return invoice;

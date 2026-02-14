@@ -11,6 +11,7 @@ LivePay is a real-time payment infrastructure for live commerce in the UEMOA zon
 - **Routing**: wouter (frontend), Express (backend)
 - **State Management**: TanStack React Query
 - **QR Codes**: qrcode library for dynamic QR generation
+- **PSP**: Bictorys (checkout + direct mobile money API)
 
 ## Key Features
 - Vendor authentication via Replit Auth
@@ -23,10 +24,22 @@ LivePay is a real-time payment infrastructure for live commerce in the UEMOA zon
 - Open Graph meta tags for rich link previews on social media
 - Client-facing mobile-first payment page with countdown timer
 - Payment method selection (Wave, Orange Money, Card, Cash)
+- Real Bictorys PSP integration (checkout redirect + webhook confirmation)
+- Wave merchant QR code (+221705000505)
 - Real-time payment status tracking (paid/pending/expired)
-- Payment provider abstraction layer (ready for PSP integration)
+- Bictorys webhook for async payment confirmation
+- Server-side payment status polling fallback
 - WhatsApp chatbot webhook skeleton (message parsing, keyword detection)
 - Dark mode support
+
+## Payment Flow
+1. Client selects payment method (Wave, Orange Money, Card, Cash)
+2. For Wave/OM/Card: Backend creates Bictorys checkout → returns redirect URL
+3. Client redirected to Bictorys hosted checkout page
+4. After payment, Bictorys redirects back to /pay/:token?status=completed
+5. Frontend polls /api/pay/:token/status for confirmation
+6. Bictorys webhook at POST /api/bictorys/webhook confirms payment asynchronously
+7. For Cash: instant confirmation, no redirect
 
 ## Project Structure
 ```
@@ -45,7 +58,7 @@ client/src/
     sessions.tsx       - Live sessions list
     session-live.tsx   - Active session with invoice generation, QR codes, WhatsApp share
     invoices.tsx       - All invoices list
-    pay.tsx            - Client payment page with method selector (public)
+    pay.tsx            - Client payment page with Bictorys redirect (public)
     qr-overlay.tsx     - QR code overlay for OBS streaming (public)
   hooks/
     use-auth.ts        - Auth hook
@@ -56,14 +69,14 @@ client/src/
 
 server/
   index.ts             - Express server entry
-  routes.ts            - API routes (including OG tags, WhatsApp webhook)
+  routes.ts            - API routes (Bictorys webhook, WhatsApp webhook, OG tags)
   storage.ts           - Database storage layer
-  payment-providers.ts - Payment provider abstraction (Wave, Orange Money, Card, Cash)
+  payment-providers.ts - Bictorys PSP integration (Wave, Orange Money, Card, Cash)
   db.ts                - Database connection
   replit_integrations/  - Auth module
 
 shared/
-  schema.ts            - Drizzle models (products, liveSessions, invoices with paymentMethod)
+  schema.ts            - Drizzle models (products, liveSessions, invoices with bictorysChargeId)
   models/auth.ts       - Auth models (users, sessions)
 ```
 
@@ -76,8 +89,10 @@ shared/
 - `PATCH /api/sessions/:id/end` - End session
 - `GET/POST /api/invoices` - Invoice CRUD (query: ?sessionId=)
 - `GET /api/pay/:token` - Public payment info
-- `POST /api/pay/:token` - Process payment with method selection
+- `POST /api/pay/:token` - Initiate payment (returns Bictorys redirect URL)
+- `GET /api/pay/:token/status` - Poll payment status (verifies with Bictorys)
 - `GET /api/payment-methods` - Available payment methods
+- `POST /api/bictorys/webhook` - Bictorys payment webhook
 - `GET /pay/:token` - Open Graph meta tags for crawlers
 - `GET/POST /api/webhooks/whatsapp` - WhatsApp Business API webhook
 
@@ -86,7 +101,14 @@ shared/
 - sessions (Auth sessions)
 - products (vendor catalog)
 - live_sessions (live selling sessions)
-- invoices (with token, paymentMethod, paymentProviderRef)
+- invoices (with token, paymentMethod, paymentProviderRef, bictorysChargeId, bictorysCheckoutUrl)
+
+## Environment Variables
+- `BICTORYS_PUBLIC_KEY` - Bictorys API public key (secret)
+- `BICTORYS_SECRET_KEY` - Bictorys API secret key (secret)
+- `WAVE_MERCHANT_PHONE` - Wave merchant phone number (+221705000505)
+- `PAYDUNYA_MODE` - Payment mode (live/test)
+- `SESSION_SECRET` - Express session secret
 
 ## Public Routes (no auth)
 - `/pay/:token` - Client payment page

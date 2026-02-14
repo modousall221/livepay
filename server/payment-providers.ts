@@ -3,104 +3,96 @@ export interface PaymentResult {
   providerRef?: string;
   error?: string;
   redirectUrl?: string;
-  paydunyaToken?: string;
+  chargeId?: string;
 }
 
 export interface PaymentProvider {
   name: string;
   processPayment(invoiceId: string, amount: number, metadata: Record<string, string>): Promise<PaymentResult>;
-  checkStatus(providerRef: string): Promise<string>;
 }
 
-function getPaydunyaHeaders() {
+function getBictorysBaseUrl() {
+  const publicKey = process.env.BICTORYS_PUBLIC_KEY || "";
+  if (publicKey.startsWith("test_")) {
+    return "https://api.test.bictorys.com";
+  }
+  return "https://api.bictorys.com";
+}
+
+function getBictorysHeaders() {
   return {
     "Content-Type": "application/json",
-    "PAYDUNYA-MASTER-KEY": process.env.PAYDUNYA_MASTER_KEY || "",
-    "PAYDUNYA-PRIVATE-KEY": process.env.PAYDUNYA_PRIVATE_KEY || "",
-    "PAYDUNYA-TOKEN": process.env.PAYDUNYA_TOKEN || "",
+    "X-Api-Key": process.env.BICTORYS_PUBLIC_KEY || "",
   };
 }
 
-function getPaydunyaBaseUrl() {
-  const mode = process.env.PAYDUNYA_MODE || "test";
-  return mode === "live"
-    ? "https://app.paydunya.com/api/v1"
-    : "https://app.paydunya.com/sandbox-api/v1";
+function getAppHost() {
+  if (process.env.REPLIT_DEV_DOMAIN) {
+    return `https://${process.env.REPLIT_DEV_DOMAIN}`;
+  }
+  if (process.env.REPL_SLUG && process.env.REPL_OWNER) {
+    return `https://${process.env.REPL_SLUG}.${process.env.REPL_OWNER}.repl.co`;
+  }
+  return "http://localhost:5000";
 }
 
-async function createPaydunyaCheckout(
+async function createBictorysCheckout(
   amount: number,
-  description: string,
   invoiceToken: string,
   clientName: string,
   clientPhone: string,
-  paymentMethod?: string
+  clientEmail: string,
+  paymentType?: string
 ): Promise<PaymentResult> {
   try {
-    const baseUrl = getPaydunyaBaseUrl();
-    const appHost = process.env.REPLIT_DEV_DOMAIN
-      ? `https://${process.env.REPLIT_DEV_DOMAIN}`
-      : process.env.REPL_SLUG
-        ? `https://${process.env.REPL_SLUG}.${process.env.REPL_OWNER}.repl.co`
-        : "http://localhost:5000";
+    const baseUrl = getBictorysBaseUrl();
+    const appHost = getAppHost();
+
+    const url = paymentType && paymentType !== "checkout"
+      ? `${baseUrl}/pay/v1/charges?payment_type=${paymentType}`
+      : `${baseUrl}/pay/v1/charges`;
 
     const payload: any = {
-      invoice: {
-        total_amount: amount,
-        description: description,
-      },
-      store: {
-        name: "LivePay",
-        tagline: "Paiement live commerce UEMOA",
-        website_url: appHost,
-      },
-      custom_data: {
-        livepay_token: invoiceToken,
-        client_name: clientName,
-        client_phone: clientPhone,
-      },
-      actions: {
-        return_url: `${appHost}/pay/${invoiceToken}?status=completed`,
-        cancel_url: `${appHost}/pay/${invoiceToken}?status=cancelled`,
-        callback_url: `${appHost}/api/paydunya/ipn`,
+      amount,
+      currency: "XOF",
+      country: "SN",
+      paymentReference: invoiceToken,
+      successRedirectUrl: `${appHost}/pay/${invoiceToken}?status=completed`,
+      errorRedirectUrl: `${appHost}/pay/${invoiceToken}?status=failed`,
+      customer: {
+        name: clientName,
+        phone: clientPhone,
+        email: clientEmail || `${clientPhone.replace(/[^0-9]/g, "")}@livepay.sn`,
       },
     };
 
-    if (paymentMethod) {
-      const channelMap: Record<string, string[]> = {
-        wave: ["wave-senegal"],
-        orange_money: ["orange-money-senegal"],
-        card: ["card"],
-      };
-      if (channelMap[paymentMethod]) {
-        payload.channels = channelMap[paymentMethod];
-      }
-    }
-
-    const response = await fetch(`${baseUrl}/checkout-invoice/create`, {
+    const response = await fetch(url, {
       method: "POST",
-      headers: getPaydunyaHeaders(),
+      headers: getBictorysHeaders(),
       body: JSON.stringify(payload),
     });
 
     const data = await response.json();
 
-    if (data.response_code === "00") {
+    if (data.link || data.chargeId || (data.data && data.data.authorization)) {
+      const checkoutLink = data.link || data.data?.authorization?.redirect || "";
+      const chargeId = data.chargeId || data.data?.id?.toString() || "";
+
       return {
         success: true,
-        redirectUrl: data.response_text,
-        paydunyaToken: data.token,
-        providerRef: `PDY-${data.token}`,
+        redirectUrl: checkoutLink,
+        chargeId,
+        providerRef: `BIC-${chargeId}`,
       };
     }
 
-    console.error("[PayDunia] Checkout creation failed:", data);
+    console.error("[Bictorys] Checkout creation failed:", data);
     return {
       success: false,
-      error: data.response_text || "Erreur lors de la creation du paiement",
+      error: data.message || "Erreur lors de la creation du paiement",
     };
   } catch (error) {
-    console.error("[PayDunia] API error:", error);
+    console.error("[Bictorys] API error:", error);
     return {
       success: false,
       error: "Erreur de connexion au service de paiement",
@@ -108,60 +100,24 @@ async function createPaydunyaCheckout(
   }
 }
 
-async function checkPaydunyaStatus(paydunyaToken: string): Promise<{ status: string; receiptUrl?: string }> {
-  try {
-    const baseUrl = getPaydunyaBaseUrl();
-    const response = await fetch(`${baseUrl}/checkout-invoice/confirm/${paydunyaToken}`, {
-      method: "GET",
-      headers: getPaydunyaHeaders(),
-    });
-
-    const data = await response.json();
-
-    if (data.response_code === "00") {
-      const statusMap: Record<string, string> = {
-        completed: "paid",
-        pending: "pending",
-        cancelled: "cancelled",
-        failed: "expired",
-      };
-      return {
-        status: statusMap[data.status] || "pending",
-        receiptUrl: data.receipt_url,
-      };
-    }
-
-    return { status: "pending" };
-  } catch (error) {
-    console.error("[PayDunia] Status check error:", error);
-    return { status: "pending" };
-  }
-}
-
-class PaydunyaProvider implements PaymentProvider {
+class BictorysProvider implements PaymentProvider {
   name: string;
-  channelId: string;
+  paymentType: string | undefined;
 
-  constructor(name: string, channelId: string) {
+  constructor(name: string, paymentType?: string) {
     this.name = name;
-    this.channelId = channelId;
+    this.paymentType = paymentType;
   }
 
   async processPayment(invoiceId: string, amount: number, metadata: Record<string, string>): Promise<PaymentResult> {
-    return createPaydunyaCheckout(
+    return createBictorysCheckout(
       amount,
-      `Paiement ${metadata.productName} - ${metadata.clientName}`,
       metadata.invoiceToken || invoiceId,
       metadata.clientName,
       metadata.clientPhone,
-      this.name
+      metadata.clientEmail || "",
+      this.paymentType
     );
-  }
-
-  async checkStatus(providerRef: string): Promise<string> {
-    const token = providerRef.replace("PDY-", "");
-    const result = await checkPaydunyaStatus(token);
-    return result.status;
   }
 }
 
@@ -175,16 +131,12 @@ class CashProvider implements PaymentProvider {
       providerRef: ref,
     };
   }
-
-  async checkStatus(providerRef: string): Promise<string> {
-    return "paid";
-  }
 }
 
 const providers: Record<string, PaymentProvider> = {
-  wave: new PaydunyaProvider("wave", "wave-senegal"),
-  orange_money: new PaydunyaProvider("orange_money", "orange-money-senegal"),
-  card: new PaydunyaProvider("card", "card"),
+  wave: new BictorysProvider("wave"),
+  orange_money: new BictorysProvider("orange_money", "orange_money"),
+  card: new BictorysProvider("card", "card"),
   cash: new CashProvider(),
 };
 
@@ -200,5 +152,3 @@ export function getAvailableProviders(): { id: string; name: string; description
     { id: "cash", name: "Especes", description: "Paiement en main propre", icon: "cash" },
   ];
 }
-
-export { checkPaydunyaStatus };

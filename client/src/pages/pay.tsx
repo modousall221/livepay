@@ -74,10 +74,31 @@ export default function Pay() {
   });
 
   useEffect(() => {
-    if (returnStatus === "completed" && token) {
+    if ((returnStatus === "completed" || returnStatus === "failed") && token) {
       setWaitingPayment(true);
     }
   }, [returnStatus, token]);
+
+  useEffect(() => {
+    if (!waitingPayment || !token) return;
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/pay/${token}/status`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.status === "paid") {
+            setWaitingPayment(false);
+            queryClient.invalidateQueries({ queryKey: ["/api/pay", token] });
+            toast({ title: "Paiement confirme" });
+            clearInterval(pollInterval);
+          }
+        }
+      } catch {}
+    }, 3000);
+
+    return () => clearInterval(pollInterval);
+  }, [waitingPayment, token, toast]);
 
   useEffect(() => {
     if (waitingPayment && invoice?.status === "paid") {
@@ -287,7 +308,7 @@ export default function Pay() {
 
                 {selectedMethod !== "cash" && (
                   <p className="text-[10px] text-center text-muted-foreground">
-                    Vous serez redirige vers la plateforme de paiement securisee PayDunya
+                    Vous serez redirige vers la plateforme de paiement securisee
                   </p>
                 )}
               </>
@@ -296,7 +317,7 @@ export default function Pay() {
 
           <div className="flex items-center justify-center gap-3 text-xs text-muted-foreground">
             <Shield className="w-3 h-3" />
-            <span>Paiement securise par PayDunya - Zone UEMOA</span>
+            <span>Paiement securise - Zone UEMOA</span>
           </div>
         </div>
       </main>

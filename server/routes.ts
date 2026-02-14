@@ -4,7 +4,7 @@ import { storage } from "./storage";
 import { setupAuth, registerAuthRoutes, isAuthenticated } from "./replit_integrations/auth";
 import { authStorage } from "./replit_integrations/auth/storage";
 import { insertProductSchema, insertLiveSessionSchema, insertInvoiceSchema } from "@shared/schema";
-import { getPaymentProvider, getAvailableProviders, checkPaydunyaStatus } from "./payment-providers";
+import { getPaymentProvider, getAvailableProviders } from "./payment-providers";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -273,10 +273,10 @@ export async function registerRoutes(
         return res.status(400).json({ message: result.error || "Echec du paiement" });
       }
 
-      if (result.paydunyaToken && result.redirectUrl) {
-        await storage.updateInvoicePaydunya(
+      if (result.chargeId && result.redirectUrl) {
+        await storage.updateInvoiceBictorys(
           invoice.id,
-          result.paydunyaToken,
+          result.chargeId,
           result.redirectUrl,
           paymentMethod,
           result.providerRef || ""
@@ -285,7 +285,7 @@ export async function registerRoutes(
           success: true,
           redirect: true,
           redirectUrl: result.redirectUrl,
-          paydunyaToken: result.paydunyaToken,
+          chargeId: result.chargeId,
         });
       }
 
@@ -297,46 +297,60 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/paydunya/ipn", async (req, res) => {
+  app.post("/api/bictorys/webhook", async (req, res) => {
     try {
       res.sendStatus(200);
 
+      const webhookSecret = process.env.BICTORYS_SECRET_KEY;
+      if (webhookSecret) {
+        const signature = req.headers["x-bictorys-signature"] || req.headers["x-webhook-signature"];
+        if (!signature) {
+          console.warn("[Bictorys Webhook] Missing signature header, skipping verification");
+        }
+      }
+
+      const event = req.body?.event;
       const data = req.body?.data;
-      if (!data) return;
 
-      const paydunyaToken = data.invoice?.token;
+      if (!event || !data) return;
+
+      const chargeId = data.id?.toString();
+      const reference = data.reference;
       const status = data.status;
-      const customData = data.custom_data || {};
-      const livepayToken = customData.livepay_token;
 
-      console.log(`[PayDunia IPN] Token: ${paydunyaToken}, Status: ${status}`);
+      console.log(`[Bictorys Webhook] Event: ${event}, ChargeId: ${chargeId}, Status: ${status}`);
 
-      if (!paydunyaToken) return;
+      if (!chargeId && !reference) return;
 
-      let invoice = await storage.getInvoiceByPaydunyaToken(paydunyaToken);
-      if (!invoice && livepayToken) {
-        invoice = await storage.getInvoiceByToken(livepayToken);
+      let invoice = chargeId ? await storage.getInvoiceByChargeId(chargeId) : null;
+      if (!invoice && reference) {
+        invoice = await storage.getInvoiceByToken(reference);
       }
       if (!invoice) {
-        console.error(`[PayDunia IPN] No invoice found for token: ${paydunyaToken}`);
+        console.error(`[Bictorys Webhook] No invoice found for charge: ${chargeId}`);
         return;
       }
 
       if (invoice.status === "paid") return;
 
-      if (status === "completed") {
+      if (chargeId && invoice.bictorysChargeId && invoice.bictorysChargeId !== chargeId) {
+        console.error(`[Bictorys Webhook] ChargeId mismatch: expected ${invoice.bictorysChargeId}, got ${chargeId}`);
+        return;
+      }
+
+      if (event === "charge.successful" || status === "success") {
         await storage.updateInvoiceStatus(
           invoice.id,
           "paid",
           invoice.paymentMethod || "wave",
-          `PDY-${paydunyaToken}`
+          `BIC-${chargeId}`
         );
-        console.log(`[PayDunia IPN] Invoice ${invoice.id} marked as paid`);
-      } else if (status === "cancelled" || status === "failed") {
-        console.log(`[PayDunia IPN] Invoice ${invoice.id} payment ${status}`);
+        console.log(`[Bictorys Webhook] Invoice ${invoice.id} marked as paid`);
+      } else if (event === "charge.failed" || status === "failed") {
+        console.log(`[Bictorys Webhook] Invoice ${invoice.id} payment failed`);
       }
     } catch (error) {
-      console.error("[PayDunia IPN] Error:", error);
+      console.error("[Bictorys Webhook] Error:", error);
     }
   });
 
@@ -352,16 +366,31 @@ export async function registerRoutes(
         return res.json({ status: "expired" });
       }
 
-      if (invoice.status === "pending" && invoice.paydunyaToken) {
-        const pdStatus = await checkPaydunyaStatus(invoice.paydunyaToken);
-        if (pdStatus.status === "paid") {
-          await storage.updateInvoiceStatus(
-            invoice.id,
-            "paid",
-            invoice.paymentMethod || "wave",
-            `PDY-${invoice.paydunyaToken}`
-          );
-          return res.json({ status: "paid" });
+      if (invoice.status === "pending" && invoice.bictorysChargeId) {
+        try {
+          const baseUrl = (process.env.BICTORYS_PUBLIC_KEY || "").startsWith("test_")
+            ? "https://api.test.bictorys.com"
+            : "https://api.bictorys.com";
+          const checkRes = await fetch(`${baseUrl}/pay/v1/charges/${invoice.bictorysChargeId}`, {
+            headers: {
+              "X-Api-Key": process.env.BICTORYS_PUBLIC_KEY || "",
+            },
+          });
+          if (checkRes.ok) {
+            const checkData = await checkRes.json();
+            const chargeStatus = checkData.data?.status || checkData.status;
+            if (chargeStatus === "success" || chargeStatus === "completed") {
+              await storage.updateInvoiceStatus(
+                invoice.id,
+                "paid",
+                invoice.paymentMethod || "wave",
+                `BIC-${invoice.bictorysChargeId}`
+              );
+              return res.json({ status: "paid" });
+            }
+          }
+        } catch (pollErr) {
+          console.error("[Bictorys] Status poll error:", pollErr);
         }
       }
 

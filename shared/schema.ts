@@ -44,6 +44,8 @@ export const invoices = pgTable("invoices", {
   expiresAt: timestamp("expires_at").notNull(),
   paymentMethod: paymentMethodEnum("payment_method"),
   paymentProviderRef: text("payment_provider_ref"),
+  paydunyaToken: text("paydunya_token"),
+  paydunyaUrl: text("paydunya_url"),
   paidAt: timestamp("paid_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
@@ -84,6 +86,8 @@ export const insertInvoiceSchema = createInsertSchema(invoices).omit({
   status: true,
   paymentMethod: true,
   paymentProviderRef: true,
+  paydunyaToken: true,
+  paydunyaUrl: true,
   paidAt: true,
   createdAt: true,
   expiresAt: true,

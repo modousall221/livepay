@@ -45,4 +45,4 @@ integrations = ["javascript_log_in_with_replit:2.0.0", "javascript_database:1.0.
 
 [userenv.shared]
 WAVE_MERCHANT_PHONE = "+221705000505"
-PAYDUNYA_MODE = "test"
+PAYDUNYA_MODE = "live"

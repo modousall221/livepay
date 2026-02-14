@@ -14,6 +14,7 @@ LivePay is a real-time payment infrastructure for live commerce in the UEMOA zon
 - **PSP**: Bictorys (checkout + direct mobile money API)
 
 ## Key Features
+- **PWA (Progressive Web App)** - Installable on mobile comme une app native
 - Vendor authentication via Replit Auth
 - Product catalog management (CRUD)
 - Live session creation and management
@@ -31,6 +32,7 @@ LivePay is a real-time payment infrastructure for live commerce in the UEMOA zon
 - Server-side payment status polling fallback
 - WhatsApp chatbot webhook skeleton (message parsing, keyword detection)
 - Dark mode support
+- Demo/test page at /demo with instructions for both experiences
 
 ## Payment Flow
 1. Client selects payment method (Wave, Orange Money, Card, Cash)
@@ -113,6 +115,7 @@ shared/
 ## Public Routes (no auth)
 - `/pay/:token` - Client payment page
 - `/qr/:token` - QR code overlay for OBS
+- `/demo` - Demo/test page with instructions
 
 ## User Preferences
 - French-language UI (target: francophone Africa)

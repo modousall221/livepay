@@ -18,6 +18,8 @@ import SessionLive from "@/pages/session-live";
 import Invoices from "@/pages/invoices";
 import Pay from "@/pages/pay";
 import QROverlay from "@/pages/qr-overlay";
+import Demo from "@/pages/demo";
+import { InstallPrompt } from "@/components/install-prompt";
 
 function AuthenticatedRouter() {
   const style = {
@@ -65,13 +67,17 @@ function AppRouter() {
   }
 
   return (
-    <Switch>
-      <Route path="/pay/:token" component={Pay} />
-      <Route path="/qr/:token" component={QROverlay} />
-      <Route>
-        {user ? <AuthenticatedRouter /> : <Landing />}
-      </Route>
-    </Switch>
+    <>
+      <Switch>
+        <Route path="/pay/:token" component={Pay} />
+        <Route path="/qr/:token" component={QROverlay} />
+        <Route path="/demo" component={Demo} />
+        <Route>
+          {user ? <AuthenticatedRouter /> : <Landing />}
+        </Route>
+      </Switch>
+      <InstallPrompt />
+    </>
   );
 }
 

@@ -45,6 +45,11 @@ export default function Landing() {
                     <ArrowRight className="w-4 h-4 ml-2" />
                   </Button>
                 </a>
+                <a href="/demo">
+                  <Button size="lg" variant="outline" data-testid="button-demo">
+                    Tester l'app
+                  </Button>
+                </a>
               </div>
               <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
                 <span className="flex items-center gap-1">

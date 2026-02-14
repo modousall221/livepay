@@ -390,55 +390,54 @@ export default function SessionLive() {
             {sessionInvoices.map((invoice) => (
               <Card
                 key={invoice.id}
-                className="p-4"
+                className="p-3 md:p-4"
                 data-testid={`card-session-invoice-${invoice.id}`}
               >
-                <div className="flex flex-wrap items-center justify-between gap-4">
-                  <div className="flex items-center gap-3 min-w-0">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 md:gap-3 min-w-0 flex-1">
                     <StatusDot status={invoice.status} />
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium truncate">{invoice.clientName}</p>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-1 md:gap-2">
+                        <p className="text-sm font-medium truncate">{invoice.clientName}</p>
+                        <StatusLabel status={invoice.status} />
+                      </div>
                       <p className="text-xs text-muted-foreground truncate">
-                        {invoice.productName} &middot; {invoice.clientPhone}
+                        {invoice.productName} &middot; {invoice.amount.toLocaleString("fr-FR")} F
                       </p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-3 shrink-0">
-                    <span className="text-sm font-bold">{invoice.amount.toLocaleString("fr-FR")} F</span>
-                    <StatusLabel status={invoice.status} />
-                    <div className="flex items-center gap-1">
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        onClick={() => copyLink(invoice.token, invoice.id)}
-                        data-testid={`button-copy-link-${invoice.id}`}
-                      >
-                        {copiedId === invoice.id ? (
-                          <Check className="w-4 h-4 text-green-500" />
-                        ) : (
-                          <Copy className="w-4 h-4" />
-                        )}
+                  <div className="flex items-center gap-0.5 shrink-0">
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      onClick={() => copyLink(invoice.token, invoice.id)}
+                      data-testid={`button-copy-link-${invoice.id}`}
+                    >
+                      {copiedId === invoice.id ? (
+                        <Check className="w-4 h-4 text-green-500" />
+                      ) : (
+                        <Copy className="w-4 h-4" />
+                      )}
+                    </Button>
+                    <ShareWhatsApp
+                      token={invoice.token}
+                      clientName={invoice.clientName}
+                      productName={invoice.productName}
+                      amount={invoice.amount}
+                    />
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      onClick={() => setQrDialogToken(invoice.token)}
+                      data-testid={`button-qr-${invoice.id}`}
+                    >
+                      <QrCode className="w-4 h-4" />
+                    </Button>
+                    <a href={`/pay/${invoice.token}`} target="_blank" rel="noopener noreferrer" className="hidden md:block">
+                      <Button size="icon" variant="ghost" data-testid={`button-open-link-${invoice.id}`}>
+                        <ExternalLink className="w-4 h-4" />
                       </Button>
-                      <ShareWhatsApp
-                        token={invoice.token}
-                        clientName={invoice.clientName}
-                        productName={invoice.productName}
-                        amount={invoice.amount}
-                      />
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        onClick={() => setQrDialogToken(invoice.token)}
-                        data-testid={`button-qr-${invoice.id}`}
-                      >
-                        <QrCode className="w-4 h-4" />
-                      </Button>
-                      <a href={`/pay/${invoice.token}`} target="_blank" rel="noopener noreferrer">
-                        <Button size="icon" variant="ghost" data-testid={`button-open-link-${invoice.id}`}>
-                          <ExternalLink className="w-4 h-4" />
-                        </Button>
-                      </a>
-                    </div>
+                    </a>
                   </div>
                 </div>
               </Card>

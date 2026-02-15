@@ -194,15 +194,8 @@ export default function Landing() {
       </main>
 
       <footer className="border-t py-6">
-        <div className="max-w-6xl mx-auto px-4 flex flex-wrap items-center justify-between gap-4 text-sm text-muted-foreground">
-          <span>LivePay &copy; 2025. Zone UEMOA.</span>
-          <div className="flex items-center gap-4">
-            <span>Conformit&eacute; BCEAO</span>
-            <span className="flex items-center gap-1">
-              <MessageCircle className="w-3 h-3 text-green-500" />
-              WhatsApp Business API
-            </span>
-          </div>
+        <div className="max-w-6xl mx-auto px-4 text-center text-sm text-muted-foreground">
+          <span>LivePay &copy; 2025</span>
         </div>
       </footer>
     </div>

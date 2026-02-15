@@ -17,41 +17,31 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { 
   User, 
   Bell, 
-  Clock, 
-  Smartphone, 
+  MessageCircle,
   Volume2, 
-  Shield,
   Save,
   Loader2,
   LogOut,
-  MessageCircle,
-  CheckCircle,
-  AlertCircle,
-  ExternalLink
+  Phone,
+  Store
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-// Settings are stored in localStorage
+// Settings locaux (localStorage)
 const SETTINGS_KEY = "livepay_vendor_settings";
 
 interface VendorSettings {
-  invoiceExpirationMinutes: number;
   enableSoundNotifications: boolean;
   notificationVolume: number;
   defaultPaymentMethod: string;
-  autoOpenWhatsApp: boolean;
-  compactView: boolean;
 }
 
 const defaultSettings: VendorSettings = {
-  invoiceExpirationMinutes: 15,
   enableSoundNotifications: true,
   notificationVolume: 50,
   defaultPaymentMethod: "wave",
-  autoOpenWhatsApp: false,
-  compactView: false,
 };
 
 function loadSettings(): VendorSettings {
@@ -91,14 +81,6 @@ async function updateVendorConfig(data: Record<string, any>) {
   return response.json();
 }
 
-async function testWhatsAppConnection() {
-  const response = await fetch("/api/vendor/test-whatsapp", {
-    method: "POST",
-    credentials: "include",
-  });
-  return response.json();
-}
-
 async function updateProfile(data: {
   firstName?: string;
   lastName?: string;
@@ -124,31 +106,24 @@ export default function Settings() {
   const [settings, setSettings] = useState<VendorSettings>(loadSettings);
   const [hasChanges, setHasChanges] = useState(false);
   
-  // WhatsApp configuration state
-  const [whatsappConfig, setWhatsappConfig] = useState({
-    whatsappPhoneNumberId: "",
-    whatsappAccessToken: "",
-    whatsappVerifyToken: "",
+  // Config chatbot simplifié (sans tokens API)
+  const [chatbotConfig, setChatbotConfig] = useState({
     welcomeMessage: "",
     reservationDurationMinutes: 10,
     autoReplyEnabled: true,
     autoReminderEnabled: true,
   });
-  const [whatsappTestResult, setWhatsappTestResult] = useState<{success: boolean; message: string; phoneNumber?: string} | null>(null);
 
   // Fetch vendor config
-  const { data: vendorConfig, isLoading: configLoading } = useQuery({
+  const { data: vendorConfig } = useQuery({
     queryKey: ["/api/vendor/config"],
     queryFn: fetchVendorConfig,
   });
 
-  // Update whatsappConfig when vendorConfig loads
+  // Charger config depuis API
   useEffect(() => {
     if (vendorConfig) {
-      setWhatsappConfig({
-        whatsappPhoneNumberId: vendorConfig.whatsappPhoneNumberId || "",
-        whatsappAccessToken: vendorConfig.whatsappAccessToken || "",
-        whatsappVerifyToken: vendorConfig.whatsappVerifyToken || "",
+      setChatbotConfig({
         welcomeMessage: vendorConfig.welcomeMessage || "",
         reservationDurationMinutes: vendorConfig.reservationDurationMinutes || 10,
         autoReplyEnabled: vendorConfig.autoReplyEnabled ?? true,
@@ -161,25 +136,10 @@ export default function Settings() {
     mutationFn: updateVendorConfig,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/vendor/config"] });
-      toast({ title: "Configuration WhatsApp enregistrée" });
+      toast({ title: "Configuration enregistrée" });
     },
     onError: () => {
       toast({ title: "Erreur", description: "Impossible de sauvegarder", variant: "destructive" });
-    },
-  });
-
-  const testWhatsAppMutation = useMutation({
-    mutationFn: testWhatsAppConnection,
-    onSuccess: (result) => {
-      setWhatsappTestResult(result);
-      if (result.success) {
-        toast({ title: "Connexion réussie", description: result.phoneNumber });
-      } else {
-        toast({ title: "Erreur", description: result.message, variant: "destructive" });
-      }
-    },
-    onError: () => {
-      toast({ title: "Erreur", description: "Test échoué", variant: "destructive" });
     },
   });
 
@@ -225,55 +185,49 @@ export default function Settings() {
     setHasChanges(true);
   };
 
-  const handleSave = () => {
+  const handleSaveSettings = () => {
     saveSettings(settings);
     setHasChanges(false);
     toast({ title: "Paramètres enregistrés" });
   };
 
-  const handleReset = () => {
-    setSettings(defaultSettings);
-    setHasChanges(true);
-  };
-
   const handleProfileSave = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!profileData.phone) {
+      toast({ title: "Erreur", description: "Le numéro de téléphone est obligatoire", variant: "destructive" });
+      return;
+    }
     profileMutation.mutate(profileData);
   };
 
+  const handleChatbotSave = () => {
+    vendorConfigMutation.mutate(chatbotConfig);
+  };
+
   return (
-    <div className="p-4 md:p-6 space-y-6 max-w-3xl">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-serif font-bold" data-testid="text-settings-title">
-            Paramètres
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Personnalisez votre expérience LivePay
-          </p>
-        </div>
-        {hasChanges && (
-          <Button onClick={handleSave} data-testid="button-save-settings">
-            <Save className="w-4 h-4 mr-2" />
-            Enregistrer
-          </Button>
-        )}
+    <div className="p-4 md:p-6 space-y-6 max-w-2xl">
+      <div>
+        <h1 className="text-2xl font-serif font-bold">Paramètres</h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          Configurez votre boutique LivePay
+        </p>
       </div>
 
-      {/* Profile Section */}
+      {/* Section Profil */}
       <Card className="p-6">
         <div className="flex items-center gap-2 mb-4">
-          <User className="w-5 h-5 text-muted-foreground" />
-          <h2 className="font-semibold">Profil</h2>
+          <User className="w-5 h-5 text-primary" />
+          <h2 className="font-semibold">Mon Profil</h2>
         </div>
+        
         <form onSubmit={handleProfileSave} className="space-y-4">
-          <div className="flex items-center gap-4 mb-4">
-            <Avatar className="w-16 h-16">
+          <div className="flex items-center gap-4 mb-4 p-3 bg-muted/50 rounded-lg">
+            <Avatar className="w-14 h-14">
               <AvatarImage src={user?.profileImageUrl || undefined} />
-              <AvatarFallback className="text-lg">{initials}</AvatarFallback>
+              <AvatarFallback className="text-lg bg-primary text-primary-foreground">{initials}</AvatarFallback>
             </Avatar>
             <div className="flex-1 min-w-0">
-              <p className="text-lg font-medium truncate">
+              <p className="font-medium truncate">
                 {user?.firstName} {user?.lastName}
               </p>
               <p className="text-sm text-muted-foreground truncate">{user?.email}</p>
@@ -302,7 +256,10 @@ export default function Settings() {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="businessName">Nom de l'entreprise</Label>
+            <Label htmlFor="businessName" className="flex items-center gap-2">
+              <Store className="w-4 h-4" />
+              Nom de la boutique
+            </Label>
             <Input
               id="businessName"
               value={profileData.businessName}
@@ -312,17 +269,25 @@ export default function Settings() {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="phone">Téléphone</Label>
+            <Label htmlFor="phone" className="flex items-center gap-2">
+              <Phone className="w-4 h-4" />
+              Numéro WhatsApp <span className="text-red-500">*</span>
+            </Label>
             <Input
               id="phone"
               type="tel"
               value={profileData.phone}
               onChange={(e) => setProfileData({ ...profileData, phone: e.target.value })}
               placeholder="+221 77 123 45 67"
+              className="text-lg"
+              required
             />
+            <p className="text-xs text-muted-foreground">
+              Ce numéro recevra les notifications de commandes et paiements
+            </p>
           </div>
 
-          <Button type="submit" disabled={profileMutation.isPending}>
+          <Button type="submit" className="w-full" disabled={profileMutation.isPending}>
             {profileMutation.isPending ? (
               <>
                 <Loader2 className="w-4 h-4 mr-2 animate-spin" />
@@ -331,94 +296,40 @@ export default function Settings() {
             ) : (
               <>
                 <Save className="w-4 h-4 mr-2" />
-                Mettre à jour le profil
+                Enregistrer le profil
               </>
             )}
           </Button>
         </form>
       </Card>
 
-      {/* WhatsApp Business API Configuration */}
-      <Card className="p-6 space-y-6">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <MessageCircle className="w-5 h-5 text-green-500" />
-            <h2 className="font-semibold">WhatsApp Business API</h2>
-          </div>
-          {whatsappTestResult && (
-            <div className={`flex items-center gap-1 text-sm ${whatsappTestResult.success ? 'text-green-500' : 'text-red-500'}`}>
-              {whatsappTestResult.success ? <CheckCircle className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
-              <span>{whatsappTestResult.success ? 'Connecté' : 'Non connecté'}</span>
-            </div>
-          )}
-        </div>
-
-        <div className="p-4 rounded-md bg-muted/50 text-sm">
-          <p className="font-medium mb-2">Comment obtenir ces identifiants ?</p>
-          <ol className="list-decimal list-inside space-y-1 text-muted-foreground">
-            <li>Créez une app sur <a href="https://developers.facebook.com" target="_blank" rel="noopener noreferrer" className="text-primary underline inline-flex items-center gap-1">Meta for Developers <ExternalLink className="w-3 h-3" /></a></li>
-            <li>Ajoutez le produit "WhatsApp Business"</li>
-            <li>Copiez le Phone Number ID et l'Access Token</li>
-          </ol>
+      {/* Section Chatbot WhatsApp */}
+      <Card className="p-6 space-y-4">
+        <div className="flex items-center gap-2">
+          <MessageCircle className="w-5 h-5 text-green-500" />
+          <h2 className="font-semibold">Chatbot WhatsApp</h2>
         </div>
 
         <div className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="waPhoneId">Phone Number ID</Label>
-            <Input
-              id="waPhoneId"
-              value={whatsappConfig.whatsappPhoneNumberId}
-              onChange={(e) => setWhatsappConfig({ ...whatsappConfig, whatsappPhoneNumberId: e.target.value })}
-              placeholder="1234567890123456"
-            />
-            <p className="text-xs text-muted-foreground">
-              ID de votre numéro WhatsApp Business (Meta Business Manager)
-            </p>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="waToken">Access Token</Label>
-            <Input
-              id="waToken"
-              type="password"
-              value={whatsappConfig.whatsappAccessToken}
-              onChange={(e) => setWhatsappConfig({ ...whatsappConfig, whatsappAccessToken: e.target.value })}
-              placeholder="EAAxxxxxxx..."
-            />
-            <p className="text-xs text-muted-foreground">
-              Token d'accès permanent de l'API WhatsApp
-            </p>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="waVerify">Verify Token (Webhook)</Label>
-            <Input
-              id="waVerify"
-              value={whatsappConfig.whatsappVerifyToken}
-              onChange={(e) => setWhatsappConfig({ ...whatsappConfig, whatsappVerifyToken: e.target.value })}
-              placeholder="livepay_webhook_verify"
-            />
-            <p className="text-xs text-muted-foreground">
-              Token de vérification pour le webhook (configurez-le dans Meta)
-            </p>
-          </div>
-
-          <div className="space-y-2">
             <Label htmlFor="welcomeMsg">Message de bienvenue</Label>
             <Textarea
               id="welcomeMsg"
-              value={whatsappConfig.welcomeMessage}
-              onChange={(e) => setWhatsappConfig({ ...whatsappConfig, welcomeMessage: e.target.value })}
-              placeholder="Bienvenue ! 🎉 Envoyez le mot-clé du produit pour commander..."
+              value={chatbotConfig.welcomeMessage}
+              onChange={(e) => setChatbotConfig({ ...chatbotConfig, welcomeMessage: e.target.value })}
+              placeholder="Bienvenue ! 🎉 Envoyez le mot-clé du produit affiché pendant le live pour commander..."
               rows={3}
             />
+            <p className="text-xs text-muted-foreground">
+              Message envoyé automatiquement aux nouveaux clients
+            </p>
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="reserveDuration">Durée de réservation</Label>
+            <Label htmlFor="reserveDuration">Délai de paiement</Label>
             <Select
-              value={whatsappConfig.reservationDurationMinutes.toString()}
-              onValueChange={(v) => setWhatsappConfig({ ...whatsappConfig, reservationDurationMinutes: parseInt(v) })}
+              value={chatbotConfig.reservationDurationMinutes.toString()}
+              onValueChange={(v) => setChatbotConfig({ ...chatbotConfig, reservationDurationMinutes: parseInt(v) })}
             >
               <SelectTrigger id="reserveDuration">
                 <SelectValue />
@@ -432,11 +343,11 @@ export default function Settings() {
               </SelectContent>
             </Select>
             <p className="text-xs text-muted-foreground">
-              Temps accordé au client pour payer après confirmation
+              Temps accordé au client pour finaliser le paiement
             </p>
           </div>
 
-          <div className="flex items-center justify-between gap-4 pt-2">
+          <div className="flex items-center justify-between gap-4 py-2 border-t">
             <div className="space-y-0.5">
               <Label>Réponse automatique</Label>
               <p className="text-xs text-muted-foreground">
@@ -444,104 +355,37 @@ export default function Settings() {
               </p>
             </div>
             <Switch
-              checked={whatsappConfig.autoReplyEnabled}
-              onCheckedChange={(v) => setWhatsappConfig({ ...whatsappConfig, autoReplyEnabled: v })}
+              checked={chatbotConfig.autoReplyEnabled}
+              onCheckedChange={(v) => setChatbotConfig({ ...chatbotConfig, autoReplyEnabled: v })}
             />
           </div>
 
           <div className="flex items-center justify-between gap-4">
             <div className="space-y-0.5">
-              <Label>Rappels automatiques</Label>
+              <Label>Rappels de paiement</Label>
               <p className="text-xs text-muted-foreground">
-                Envoyer des rappels avant expiration des commandes
+                Envoyer un rappel avant expiration
               </p>
             </div>
             <Switch
-              checked={whatsappConfig.autoReminderEnabled}
-              onCheckedChange={(v) => setWhatsappConfig({ ...whatsappConfig, autoReminderEnabled: v })}
+              checked={chatbotConfig.autoReminderEnabled}
+              onCheckedChange={(v) => setChatbotConfig({ ...chatbotConfig, autoReminderEnabled: v })}
             />
           </div>
         </div>
 
-        <div className="flex gap-2 pt-2">
-          <Button
-            variant="outline"
-            onClick={() => testWhatsAppMutation.mutate()}
-            disabled={testWhatsAppMutation.isPending || !whatsappConfig.whatsappPhoneNumberId}
-          >
-            {testWhatsAppMutation.isPending ? (
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-            ) : (
-              <CheckCircle className="w-4 h-4 mr-2" />
-            )}
-            Tester la connexion
-          </Button>
-          <Button
-            onClick={() => vendorConfigMutation.mutate(whatsappConfig)}
-            disabled={vendorConfigMutation.isPending}
-          >
-            {vendorConfigMutation.isPending ? (
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-            ) : (
-              <Save className="w-4 h-4 mr-2" />
-            )}
-            Enregistrer
-          </Button>
-        </div>
+        <Button onClick={handleChatbotSave} className="w-full" disabled={vendorConfigMutation.isPending}>
+          {vendorConfigMutation.isPending ? (
+            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+          ) : (
+            <Save className="w-4 h-4 mr-2" />
+          )}
+          Enregistrer
+        </Button>
       </Card>
 
-      {/* Invoice Settings */}
-      <Card className="p-6 space-y-6">
-        <div className="flex items-center gap-2">
-          <Clock className="w-5 h-5 text-muted-foreground" />
-          <h2 className="font-semibold">Factures</h2>
-        </div>
-
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="expiration">Délai d'expiration des factures</Label>
-            <Select
-              value={settings.invoiceExpirationMinutes.toString()}
-              onValueChange={(v: string) => updateSetting("invoiceExpirationMinutes", parseInt(v))}
-            >
-              <SelectTrigger id="expiration">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="5">5 minutes</SelectItem>
-                <SelectItem value="10">10 minutes</SelectItem>
-                <SelectItem value="15">15 minutes</SelectItem>
-                <SelectItem value="30">30 minutes</SelectItem>
-                <SelectItem value="60">1 heure</SelectItem>
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground">
-              Temps accordé au client pour effectuer le paiement
-            </p>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="defaultPayment">Mode de paiement par défaut</Label>
-            <Select
-              value={settings.defaultPaymentMethod}
-              onValueChange={(v: string) => updateSetting("defaultPaymentMethod", v)}
-            >
-              <SelectTrigger id="defaultPayment">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="wave">Wave</SelectItem>
-                <SelectItem value="orange_money">Orange Money</SelectItem>
-                <SelectItem value="card">Carte bancaire</SelectItem>
-                <SelectItem value="cash">Espèces</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-      </Card>
-
-      {/* Notification Settings */}
-      <Card className="p-6 space-y-6">
+      {/* Section Notifications */}
+      <Card className="p-6 space-y-4">
         <div className="flex items-center gap-2">
           <Bell className="w-5 h-5 text-muted-foreground" />
           <h2 className="font-semibold">Notifications</h2>
@@ -550,22 +394,21 @@ export default function Settings() {
         <div className="space-y-4">
           <div className="flex items-center justify-between gap-4">
             <div className="space-y-0.5">
-              <Label htmlFor="soundNotif">Notifications sonores</Label>
+              <Label>Notifications sonores</Label>
               <p className="text-xs text-muted-foreground">
-                Jouer un son lors de la réception d'un paiement
+                Son lors de la réception d'un paiement
               </p>
             </div>
             <Switch
-              id="soundNotif"
               checked={settings.enableSoundNotifications}
-              onCheckedChange={(v: boolean) => updateSetting("enableSoundNotifications", v)}
+              onCheckedChange={(v) => updateSetting("enableSoundNotifications", v)}
             />
           </div>
 
           {settings.enableSoundNotifications && (
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label htmlFor="volume">Volume</Label>
+                <Label>Volume</Label>
                 <span className="text-sm text-muted-foreground">
                   {settings.notificationVolume}%
                 </span>
@@ -573,9 +416,8 @@ export default function Settings() {
               <div className="flex items-center gap-3">
                 <Volume2 className="w-4 h-4 text-muted-foreground" />
                 <Slider
-                  id="volume"
                   value={[settings.notificationVolume]}
-                  onValueChange={([v]: number[]) => updateSetting("notificationVolume", v)}
+                  onValueChange={([v]) => updateSetting("notificationVolume", v)}
                   max={100}
                   step={10}
                   className="flex-1"
@@ -583,84 +425,53 @@ export default function Settings() {
               </div>
             </div>
           )}
-        </div>
-      </Card>
 
-      {/* App Settings */}
-      <Card className="p-6 space-y-6">
-        <div className="flex items-center gap-2">
-          <Smartphone className="w-5 h-5 text-muted-foreground" />
-          <h2 className="font-semibold">Application</h2>
-        </div>
-
-        <div className="space-y-4">
-          <div className="flex items-center justify-between gap-4">
-            <div className="space-y-0.5">
-              <Label htmlFor="autoWhatsApp">Ouvrir WhatsApp automatiquement</Label>
-              <p className="text-xs text-muted-foreground">
-                Ouvrir WhatsApp après la création d'une facture
-              </p>
-            </div>
-            <Switch
-              id="autoWhatsApp"
-              checked={settings.autoOpenWhatsApp}
-              onCheckedChange={(v: boolean) => updateSetting("autoOpenWhatsApp", v)}
-            />
-          </div>
-
-          <div className="flex items-center justify-between gap-4">
-            <div className="space-y-0.5">
-              <Label htmlFor="compactView">Vue compacte</Label>
-              <p className="text-xs text-muted-foreground">
-                Réduire l'espacement pour voir plus de contenu
-              </p>
-            </div>
-            <Switch
-              id="compactView"
-              checked={settings.compactView}
-              onCheckedChange={(v: boolean) => updateSetting("compactView", v)}
-            />
+          <div className="space-y-2">
+            <Label>Mode de paiement par défaut</Label>
+            <Select
+              value={settings.defaultPaymentMethod}
+              onValueChange={(v) => updateSetting("defaultPaymentMethod", v)}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="wave">Wave</SelectItem>
+                <SelectItem value="orange_money">Orange Money</SelectItem>
+                <SelectItem value="card">Carte bancaire</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </div>
+
+        {hasChanges && (
+          <Button onClick={handleSaveSettings} className="w-full">
+            <Save className="w-4 h-4 mr-2" />
+            Enregistrer
+          </Button>
+        )}
       </Card>
 
-      {/* Security Section */}
-      <Card className="p-6 space-y-4">
-        <div className="flex items-center gap-2">
-          <Shield className="w-5 h-5 text-muted-foreground" />
-          <h2 className="font-semibold">Sécurité</h2>
-        </div>
-        
-        <div className="p-4 rounded-md bg-muted/50">
-          <p className="text-sm text-muted-foreground">
-            Vos données sont protégées. Les paiements sont sécurisés via notre partenaire 
-            Bictorys, certifié BCEAO pour les transactions dans la zone UEMOA.
-          </p>
-        </div>
-
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={handleReset} className="flex-1">
-            Réinitialiser les paramètres
-          </Button>
-          <Button 
-            variant="destructive" 
-            onClick={() => logout()} 
-            disabled={isLoggingOut}
-            className="flex-1"
-          >
-            {isLoggingOut ? (
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-            ) : (
-              <LogOut className="w-4 h-4 mr-2" />
-            )}
-            Se déconnecter
-          </Button>
-        </div>
+      {/* Déconnexion */}
+      <Card className="p-6">
+        <Button 
+          variant="destructive" 
+          onClick={() => logout()} 
+          disabled={isLoggingOut}
+          className="w-full"
+        >
+          {isLoggingOut ? (
+            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+          ) : (
+            <LogOut className="w-4 h-4 mr-2" />
+          )}
+          Se déconnecter
+        </Button>
       </Card>
     </div>
   );
 }
 
-// Export the loadSettings function for use in other components
+// Export pour compatibilité
 export { loadSettings };
 export type { VendorSettings };

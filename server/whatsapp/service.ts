@@ -10,12 +10,14 @@ import { liveSessions } from "@shared/schema";
 import { eq, and } from "drizzle-orm";
 import crypto from "crypto";
 import type { VendorConfig, Product, Order } from "@shared/schema";
+import { ScoringEngine } from "../services/scoring-engine";
 
 // Configuration WhatsApp Business API
 const WHATSAPP_API_URL = "https://graph.facebook.com/v18.0";
 
 // Cache des états de conversation (en production, utiliser Redis)
 const conversationStates = new Map<string, ConversationState>();
+const scoringEngine = ScoringEngine.getInstance();
 
 /**
  * Service WhatsApp LivePay - Chatbot Transactionnel
@@ -375,6 +377,7 @@ Confirmer ?`,
 
   /**
    * Confirme la commande et envoie le lien de paiement
+   * Utilise le scoring pour adapter le délai de réservation
    */
   private async confirmOrder(
     clientPhone: string,
@@ -409,7 +412,17 @@ Confirmer ?`,
     }
 
     const totalAmount = product.price * quantity;
-    const reservationMinutes = vendorConfig.reservationDurationMinutes || 10;
+    
+    // Scoring: récupérer ou créer le client et calculer son score
+    let client = await storage.getOrCreateClient(vendorConfig.vendorId, clientPhone, clientName);
+    const clientScore = scoringEngine.calculateScore(client);
+    
+    // Adapter la durée de réservation selon le score
+    let reservationMinutes = vendorConfig.reservationDurationMinutes || 10;
+    if (clientScore.recommendations) {
+      reservationMinutes = clientScore.recommendations.reservationMinutes;
+    }
+    
     const expiresAt = new Date(Date.now() + reservationMinutes * 60 * 1000);
 
     const [activeSession] = await db
@@ -429,6 +442,7 @@ Confirmer ?`,
         unitPrice: product.price,
         totalAmount,
         expiresAt,
+        clientId: client.id,
       });
 
       state.context.orderId = order.id;
@@ -440,9 +454,15 @@ Confirmer ?`,
 
       await storage.updateOrderPaymentInfo(order.id, payUrl, "wave");
 
+      // Message personnalisé selon le tier du client
+      let tierEmoji = "";
+      if (clientScore.tier === "diamond") tierEmoji = "💎 ";
+      else if (clientScore.tier === "gold") tierEmoji = "🥇 ";
+      else if (clientScore.tier === "silver") tierEmoji = "🥈 ";
+
       await this.sendText(
         clientPhone,
-        `✅ *Commande créée !*
+        `${tierEmoji}✅ *Commande créée !*
 
 📦 ${product.name} x${quantity}
 💰 Total: *${totalAmount.toLocaleString("fr-FR")} FCFA*
@@ -456,7 +476,7 @@ _Paiement sécurisé via Wave, Orange Money ou Carte_`,
         vendorConfig
       );
 
-      console.log(`[WhatsApp Bot] Commande: ${order.id} - ${clientPhone} - ${product.name} x${quantity}`);
+      console.log(`[WhatsApp Bot] Commande: ${order.id} - ${clientPhone} - ${product.name} x${quantity} - Score: ${clientScore.trustScore} - Tier: ${clientScore.tier}`);
     } catch (error) {
       await storage.releaseStock(product.id, quantity);
       console.error("[WhatsApp Bot] Erreur:", error);
@@ -586,7 +606,7 @@ Merci ! 🎉`;
   }
 
   /**
-   * Notifie le vendeur
+   * Notifie le vendeur d'une nouvelle commande
    */
   async notifyVendorNewOrder(order: Order, vendorPhone?: string): Promise<void> {
     if (!vendorPhone) return;
@@ -600,6 +620,48 @@ Merci ! 🎉`;
 
 👤 ${order.clientName || order.clientPhone}
 📱 ${order.clientPhone}
+
+⏳ En attente de paiement
+🧾 #${order.id.slice(0, 8).toUpperCase()}`
+    );
+  }
+
+  /**
+   * Notifie le vendeur qu'un paiement a été reçu
+   */
+  async notifyVendorPaymentReceived(order: Order, vendorPhone?: string): Promise<void> {
+    if (!vendorPhone) return;
+
+    await this.sendText(
+      vendorPhone,
+      `💰 *Paiement reçu !*
+
+✅ ${order.productName} x${order.quantity}
+💵 ${order.totalAmount.toLocaleString("fr-FR")} FCFA
+
+👤 ${order.clientName || "Client"}
+📱 ${order.clientPhone}
+
+📦 Préparez cette commande !
+🧾 #${order.id.slice(0, 8).toUpperCase()}`
+    );
+  }
+
+  /**
+   * Notifie le vendeur d'une commande expirée
+   */
+  async notifyVendorOrderExpired(order: Order, vendorPhone?: string): Promise<void> {
+    if (!vendorPhone) return;
+
+    await this.sendText(
+      vendorPhone,
+      `⏰ *Commande expirée*
+
+📦 ${order.productName} x${order.quantity}
+💰 ${order.totalAmount.toLocaleString("fr-FR")} FCFA
+
+👤 ${order.clientName || "Client"} - Non payé dans les délais
+📊 Stock libéré automatiquement
 
 🧾 #${order.id.slice(0, 8).toUpperCase()}`
     );

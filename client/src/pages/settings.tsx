@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -22,11 +23,15 @@ import {
   Shield,
   Save,
   Loader2,
-  LogOut
+  LogOut,
+  MessageCircle,
+  CheckCircle,
+  AlertCircle,
+  ExternalLink
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 // Settings are stored in localStorage
 const SETTINGS_KEY = "livepay_vendor_settings";
@@ -69,6 +74,31 @@ function saveSettings(settings: VendorSettings): void {
   }
 }
 
+async function fetchVendorConfig() {
+  const response = await fetch("/api/vendor/config", { credentials: "include" });
+  if (!response.ok) throw new Error("Erreur chargement config");
+  return response.json();
+}
+
+async function updateVendorConfig(data: Record<string, any>) {
+  const response = await fetch("/api/vendor/config", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify(data),
+  });
+  if (!response.ok) throw new Error("Erreur mise à jour config");
+  return response.json();
+}
+
+async function testWhatsAppConnection() {
+  const response = await fetch("/api/vendor/test-whatsapp", {
+    method: "POST",
+    credentials: "include",
+  });
+  return response.json();
+}
+
 async function updateProfile(data: {
   firstName?: string;
   lastName?: string;
@@ -94,6 +124,65 @@ export default function Settings() {
   const [settings, setSettings] = useState<VendorSettings>(loadSettings);
   const [hasChanges, setHasChanges] = useState(false);
   
+  // WhatsApp configuration state
+  const [whatsappConfig, setWhatsappConfig] = useState({
+    whatsappPhoneNumberId: "",
+    whatsappAccessToken: "",
+    whatsappVerifyToken: "",
+    welcomeMessage: "",
+    reservationDurationMinutes: 10,
+    autoReplyEnabled: true,
+    autoReminderEnabled: true,
+  });
+  const [whatsappTestResult, setWhatsappTestResult] = useState<{success: boolean; message: string; phoneNumber?: string} | null>(null);
+
+  // Fetch vendor config
+  const { data: vendorConfig, isLoading: configLoading } = useQuery({
+    queryKey: ["/api/vendor/config"],
+    queryFn: fetchVendorConfig,
+  });
+
+  // Update whatsappConfig when vendorConfig loads
+  useEffect(() => {
+    if (vendorConfig) {
+      setWhatsappConfig({
+        whatsappPhoneNumberId: vendorConfig.whatsappPhoneNumberId || "",
+        whatsappAccessToken: vendorConfig.whatsappAccessToken || "",
+        whatsappVerifyToken: vendorConfig.whatsappVerifyToken || "",
+        welcomeMessage: vendorConfig.welcomeMessage || "",
+        reservationDurationMinutes: vendorConfig.reservationDurationMinutes || 10,
+        autoReplyEnabled: vendorConfig.autoReplyEnabled ?? true,
+        autoReminderEnabled: vendorConfig.autoReminderEnabled ?? true,
+      });
+    }
+  }, [vendorConfig]);
+
+  const vendorConfigMutation = useMutation({
+    mutationFn: updateVendorConfig,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/vendor/config"] });
+      toast({ title: "Configuration WhatsApp enregistrée" });
+    },
+    onError: () => {
+      toast({ title: "Erreur", description: "Impossible de sauvegarder", variant: "destructive" });
+    },
+  });
+
+  const testWhatsAppMutation = useMutation({
+    mutationFn: testWhatsAppConnection,
+    onSuccess: (result) => {
+      setWhatsappTestResult(result);
+      if (result.success) {
+        toast({ title: "Connexion réussie", description: result.phoneNumber });
+      } else {
+        toast({ title: "Erreur", description: result.message, variant: "destructive" });
+      }
+    },
+    onError: () => {
+      toast({ title: "Erreur", description: "Test échoué", variant: "destructive" });
+    },
+  });
+
   // Profile form state
   const [profileData, setProfileData] = useState({
     firstName: user?.firstName || "",
@@ -247,6 +336,158 @@ export default function Settings() {
             )}
           </Button>
         </form>
+      </Card>
+
+      {/* WhatsApp Business API Configuration */}
+      <Card className="p-6 space-y-6">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <MessageCircle className="w-5 h-5 text-green-500" />
+            <h2 className="font-semibold">WhatsApp Business API</h2>
+          </div>
+          {whatsappTestResult && (
+            <div className={`flex items-center gap-1 text-sm ${whatsappTestResult.success ? 'text-green-500' : 'text-red-500'}`}>
+              {whatsappTestResult.success ? <CheckCircle className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+              <span>{whatsappTestResult.success ? 'Connecté' : 'Non connecté'}</span>
+            </div>
+          )}
+        </div>
+
+        <div className="p-4 rounded-md bg-muted/50 text-sm">
+          <p className="font-medium mb-2">Comment obtenir ces identifiants ?</p>
+          <ol className="list-decimal list-inside space-y-1 text-muted-foreground">
+            <li>Créez une app sur <a href="https://developers.facebook.com" target="_blank" rel="noopener noreferrer" className="text-primary underline inline-flex items-center gap-1">Meta for Developers <ExternalLink className="w-3 h-3" /></a></li>
+            <li>Ajoutez le produit "WhatsApp Business"</li>
+            <li>Copiez le Phone Number ID et l'Access Token</li>
+          </ol>
+        </div>
+
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="waPhoneId">Phone Number ID</Label>
+            <Input
+              id="waPhoneId"
+              value={whatsappConfig.whatsappPhoneNumberId}
+              onChange={(e) => setWhatsappConfig({ ...whatsappConfig, whatsappPhoneNumberId: e.target.value })}
+              placeholder="1234567890123456"
+            />
+            <p className="text-xs text-muted-foreground">
+              ID de votre numéro WhatsApp Business (Meta Business Manager)
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="waToken">Access Token</Label>
+            <Input
+              id="waToken"
+              type="password"
+              value={whatsappConfig.whatsappAccessToken}
+              onChange={(e) => setWhatsappConfig({ ...whatsappConfig, whatsappAccessToken: e.target.value })}
+              placeholder="EAAxxxxxxx..."
+            />
+            <p className="text-xs text-muted-foreground">
+              Token d'accès permanent de l'API WhatsApp
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="waVerify">Verify Token (Webhook)</Label>
+            <Input
+              id="waVerify"
+              value={whatsappConfig.whatsappVerifyToken}
+              onChange={(e) => setWhatsappConfig({ ...whatsappConfig, whatsappVerifyToken: e.target.value })}
+              placeholder="livepay_webhook_verify"
+            />
+            <p className="text-xs text-muted-foreground">
+              Token de vérification pour le webhook (configurez-le dans Meta)
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="welcomeMsg">Message de bienvenue</Label>
+            <Textarea
+              id="welcomeMsg"
+              value={whatsappConfig.welcomeMessage}
+              onChange={(e) => setWhatsappConfig({ ...whatsappConfig, welcomeMessage: e.target.value })}
+              placeholder="Bienvenue ! 🎉 Envoyez le mot-clé du produit pour commander..."
+              rows={3}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="reserveDuration">Durée de réservation</Label>
+            <Select
+              value={whatsappConfig.reservationDurationMinutes.toString()}
+              onValueChange={(v) => setWhatsappConfig({ ...whatsappConfig, reservationDurationMinutes: parseInt(v) })}
+            >
+              <SelectTrigger id="reserveDuration">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="5">5 minutes</SelectItem>
+                <SelectItem value="10">10 minutes</SelectItem>
+                <SelectItem value="15">15 minutes</SelectItem>
+                <SelectItem value="20">20 minutes</SelectItem>
+                <SelectItem value="30">30 minutes</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Temps accordé au client pour payer après confirmation
+            </p>
+          </div>
+
+          <div className="flex items-center justify-between gap-4 pt-2">
+            <div className="space-y-0.5">
+              <Label>Réponse automatique</Label>
+              <p className="text-xs text-muted-foreground">
+                Le chatbot répond automatiquement aux clients
+              </p>
+            </div>
+            <Switch
+              checked={whatsappConfig.autoReplyEnabled}
+              onCheckedChange={(v) => setWhatsappConfig({ ...whatsappConfig, autoReplyEnabled: v })}
+            />
+          </div>
+
+          <div className="flex items-center justify-between gap-4">
+            <div className="space-y-0.5">
+              <Label>Rappels automatiques</Label>
+              <p className="text-xs text-muted-foreground">
+                Envoyer des rappels avant expiration des commandes
+              </p>
+            </div>
+            <Switch
+              checked={whatsappConfig.autoReminderEnabled}
+              onCheckedChange={(v) => setWhatsappConfig({ ...whatsappConfig, autoReminderEnabled: v })}
+            />
+          </div>
+        </div>
+
+        <div className="flex gap-2 pt-2">
+          <Button
+            variant="outline"
+            onClick={() => testWhatsAppMutation.mutate()}
+            disabled={testWhatsAppMutation.isPending || !whatsappConfig.whatsappPhoneNumberId}
+          >
+            {testWhatsAppMutation.isPending ? (
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <CheckCircle className="w-4 h-4 mr-2" />
+            )}
+            Tester la connexion
+          </Button>
+          <Button
+            onClick={() => vendorConfigMutation.mutate(whatsappConfig)}
+            disabled={vendorConfigMutation.isPending}
+          >
+            {vendorConfigMutation.isPending ? (
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <Save className="w-4 h-4 mr-2" />
+            )}
+            Enregistrer
+          </Button>
+        </div>
       </Card>
 
       {/* Invoice Settings */}

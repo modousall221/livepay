@@ -704,6 +704,11 @@ export async function registerRoutes(
         const vendorConfig = await storage.getVendorConfig(order.vendorId);
         if (updated) {
           await whatsappService.notifyPaymentReceived(updated, vendorConfig || undefined);
+          // Also notify vendor
+          const vendor = await authStorage.getUser(order.vendorId);
+          if (vendor?.phone) {
+            await whatsappService.notifyVendorPaymentReceived(updated, vendor.phone);
+          }
         }
         
         return res.json({ success: true, order: updated });
@@ -736,6 +741,11 @@ export async function registerRoutes(
       const vendorConfig = await storage.getVendorConfig(order.vendorId);
       if (updated) {
         await whatsappService.notifyPaymentReceived(updated, vendorConfig || undefined);
+        // Also notify vendor
+        const vendor = await authStorage.getUser(order.vendorId);
+        if (vendor?.phone) {
+          await whatsappService.notifyVendorPaymentReceived(updated, vendor.phone);
+        }
       }
       
       res.json({ success: true, order: updated });
@@ -842,17 +852,33 @@ export async function registerRoutes(
     try {
       const user = req.user as any;
       const vendorId = user.id;
-      const { welcomeMessage, reservationDurationMinutes, autoReplyEnabled } = req.body;
+      const { 
+        welcomeMessage, 
+        reservationDurationMinutes, 
+        autoReplyEnabled,
+        whatsappPhoneNumberId,
+        whatsappAccessToken,
+        whatsappVerifyToken,
+        autoReminderEnabled,
+        segment,
+        businessName
+      } = req.body;
       
       const updateData: Record<string, any> = {};
       if (welcomeMessage !== undefined) updateData.welcomeMessage = welcomeMessage;
       if (reservationDurationMinutes !== undefined) updateData.reservationDurationMinutes = reservationDurationMinutes;
       if (autoReplyEnabled !== undefined) updateData.autoReplyEnabled = autoReplyEnabled;
+      if (whatsappPhoneNumberId !== undefined) updateData.whatsappPhoneNumberId = whatsappPhoneNumberId;
+      if (whatsappAccessToken !== undefined) updateData.whatsappAccessToken = whatsappAccessToken;
+      if (whatsappVerifyToken !== undefined) updateData.whatsappVerifyToken = whatsappVerifyToken;
+      if (autoReminderEnabled !== undefined) updateData.autoReminderEnabled = autoReminderEnabled;
+      if (segment !== undefined) updateData.segment = segment;
+      if (businessName !== undefined) updateData.businessName = businessName;
 
       let config = await storage.getVendorConfig(vendorId);
       if (!config) {
-        const businessName = user.businessName || `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email;
-        config = await storage.createVendorConfig({ vendorId, businessName, ...updateData });
+        const defaultBusinessName = businessName || user.businessName || `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email;
+        config = await storage.createVendorConfig({ vendorId, businessName: defaultBusinessName, ...updateData });
       } else {
         config = await storage.updateVendorConfig(vendorId, updateData);
       }
@@ -861,6 +887,48 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error updating vendor config:", error);
       res.status(500).json({ message: "Failed to update config" });
+    }
+  });
+
+  // Test WhatsApp connection
+  app.post("/api/vendor/test-whatsapp", isAuthenticated, async (req: any, res) => {
+    try {
+      const vendorId = (req.user as any).id;
+      const config = await storage.getVendorConfig(vendorId);
+      
+      if (!config?.whatsappPhoneNumberId || !config?.whatsappAccessToken) {
+        return res.status(400).json({ 
+          success: false, 
+          message: "Configuration WhatsApp incomplète. Veuillez configurer Phone Number ID et Access Token." 
+        });
+      }
+
+      // Tester la connexion avec l'API Meta
+      const response = await fetch(
+        `https://graph.facebook.com/v18.0/${config.whatsappPhoneNumberId}`,
+        {
+          headers: { "Authorization": `Bearer ${config.whatsappAccessToken}` }
+        }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        res.json({ 
+          success: true, 
+          message: "Connexion WhatsApp réussie !",
+          phoneNumber: data.display_phone_number,
+          verifiedName: data.verified_name
+        });
+      } else {
+        const error = await response.json();
+        res.status(400).json({ 
+          success: false, 
+          message: error.error?.message || "Erreur de connexion WhatsApp" 
+        });
+      }
+    } catch (error) {
+      console.error("WhatsApp test error:", error);
+      res.status(500).json({ success: false, message: "Erreur de test WhatsApp" });
     }
   });
 

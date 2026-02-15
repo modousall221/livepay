@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import {
   Dialog,
   DialogContent,
@@ -17,14 +18,15 @@ import {
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { insertProductSchema, type Product, type InsertProduct } from "@shared/schema";
-import { Plus, Package, Trash2 } from "lucide-react";
+import { Plus, Package, Trash2, Pencil } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { isUnauthorizedError } from "@/lib/auth-utils";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 export default function Products() {
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
 
   const { data: products, isLoading } = useQuery<Product[]>({
     queryKey: ["/api/products"],
@@ -33,18 +35,46 @@ export default function Products() {
   const form = useForm<InsertProduct>({
     resolver: zodResolver(
       insertProductSchema.extend({
+        keyword: insertProductSchema.shape.keyword.min(1, "Mot-clé requis"),
         name: insertProductSchema.shape.name.min(1, "Nom requis"),
         price: insertProductSchema.shape.price.min(1, "Prix requis"),
       })
     ),
     defaultValues: {
+      keyword: "",
       name: "",
       price: 0,
+      stock: 0,
       description: "",
       imageUrl: "",
       active: true,
     },
   });
+
+  // Reset form when dialog closes or when editing a product
+  useEffect(() => {
+    if (editingProduct) {
+      form.reset({
+        keyword: editingProduct.keyword || "",
+        name: editingProduct.name,
+        price: editingProduct.price,
+        stock: editingProduct.stock || 0,
+        description: editingProduct.description || "",
+        imageUrl: editingProduct.imageUrl || "",
+        active: editingProduct.active,
+      });
+    } else if (!open) {
+      form.reset({
+        keyword: "",
+        name: "",
+        price: 0,
+        stock: 0,
+        description: "",
+        imageUrl: "",
+        active: true,
+      });
+    }
+  }, [editingProduct, open, form]);
 
   const createMutation = useMutation({
     mutationFn: (data: InsertProduct) => apiRequest("POST", "/api/products", data),
@@ -52,11 +82,30 @@ export default function Products() {
       queryClient.invalidateQueries({ queryKey: ["/api/products"] });
       form.reset();
       setOpen(false);
-      toast({ title: "Produit cr\u00e9\u00e9" });
+      toast({ title: "Produit créé" });
     },
     onError: (error: Error) => {
       if (isUnauthorizedError(error)) {
-        toast({ title: "Non autoris\u00e9", description: "Reconnexion...", variant: "destructive" });
+        toast({ title: "Non autorisé", description: "Reconnexion...", variant: "destructive" });
+        setTimeout(() => { window.location.href = "/api/login"; }, 500);
+        return;
+      }
+      toast({ title: "Erreur", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Partial<InsertProduct> }) => 
+      apiRequest("PATCH", `/api/products/${id}`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      setEditingProduct(null);
+      setOpen(false);
+      toast({ title: "Produit mis à jour" });
+    },
+    onError: (error: Error) => {
+      if (isUnauthorizedError(error)) {
+        toast({ title: "Non autorisé", description: "Reconnexion...", variant: "destructive" });
         setTimeout(() => { window.location.href = "/api/login"; }, 500);
         return;
       }
@@ -68,11 +117,11 @@ export default function Products() {
     mutationFn: (id: string) => apiRequest("DELETE", `/api/products/${id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/products"] });
-      toast({ title: "Produit supprim\u00e9" });
+      toast({ title: "Produit supprimé" });
     },
     onError: (error: Error) => {
       if (isUnauthorizedError(error)) {
-        toast({ title: "Non autoris\u00e9", description: "Reconnexion...", variant: "destructive" });
+        toast({ title: "Non autorisé", description: "Reconnexion...", variant: "destructive" });
         setTimeout(() => { window.location.href = "/api/login"; }, 500);
         return;
       }
@@ -80,29 +129,86 @@ export default function Products() {
     },
   });
 
+  const toggleActiveMutation = useMutation({
+    mutationFn: ({ id, active }: { id: string; active: boolean }) =>
+      apiRequest("PATCH", `/api/products/${id}`, { active }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Erreur", description: error.message, variant: "destructive" });
+    },
+  });
+
   const onSubmit = (data: InsertProduct) => {
-    createMutation.mutate(data);
+    if (editingProduct) {
+      updateMutation.mutate({ id: editingProduct.id, data });
+    } else {
+      createMutation.mutate(data);
+    }
+  };
+
+  const handleOpenCreate = () => {
+    setEditingProduct(null);
+    form.reset({
+      keyword: "",
+      name: "",
+      price: 0,
+      stock: 0,
+      description: "",
+      imageUrl: "",
+      active: true,
+    });
+    setOpen(true);
+  };
+
+  const handleOpenEdit = (product: Product) => {
+    setEditingProduct(product);
+    setOpen(true);
+  };
+
+  const handleDialogChange = (isOpen: boolean) => {
+    setOpen(isOpen);
+    if (!isOpen) {
+      setEditingProduct(null);
+    }
   };
 
   return (
     <div className="p-4 md:p-6 space-y-6 max-w-5xl">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-serif font-bold" data-testid="text-products-title">Produits</h1>
-          <p className="text-sm text-muted-foreground mt-1">G&eacute;rez votre catalogue de produits</p>
+          <h1 className="text-2xl font-bold" data-testid="text-products-title">Produits</h1>
+          <p className="text-sm text-muted-foreground mt-1">Gérez vos produits avec mots-clés pour le chatbot WhatsApp</p>
         </div>
-        <Dialog open={open} onOpenChange={setOpen}>
+        <Dialog open={open} onOpenChange={handleDialogChange}>
           <DialogTrigger asChild>
-            <Button data-testid="button-add-product">
+            <Button onClick={handleOpenCreate} data-testid="button-add-product">
               <Plus className="w-4 h-4 mr-2" />
               Ajouter
             </Button>
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Nouveau produit</DialogTitle>
+              <DialogTitle>{editingProduct ? "Modifier le produit" : "Nouveau produit"}</DialogTitle>
             </DialogHeader>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="keyword">Mot-clé WhatsApp</Label>
+                <Input
+                  id="keyword"
+                  {...form.register("keyword")}
+                  placeholder="Ex: ROBE1, CHAUSSURE2"
+                  className="font-mono uppercase"
+                  data-testid="input-product-keyword"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Le client enverra ce mot-clé sur WhatsApp pour commander
+                </p>
+                {form.formState.errors.keyword && (
+                  <p className="text-xs text-destructive">{form.formState.errors.keyword.message}</p>
+                )}
+              </div>
               <div className="space-y-2">
                 <Label htmlFor="name">Nom</Label>
                 <Input
@@ -115,18 +221,30 @@ export default function Products() {
                   <p className="text-xs text-destructive">{form.formState.errors.name.message}</p>
                 )}
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="price">Prix (FCFA)</Label>
-                <Input
-                  id="price"
-                  type="number"
-                  {...form.register("price", { valueAsNumber: true })}
-                  placeholder="15000"
-                  data-testid="input-product-price"
-                />
-                {form.formState.errors.price && (
-                  <p className="text-xs text-destructive">{form.formState.errors.price.message}</p>
-                )}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="price">Prix (FCFA)</Label>
+                  <Input
+                    id="price"
+                    type="number"
+                    {...form.register("price", { valueAsNumber: true })}
+                    placeholder="15000"
+                    data-testid="input-product-price"
+                  />
+                  {form.formState.errors.price && (
+                    <p className="text-xs text-destructive">{form.formState.errors.price.message}</p>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="stock">Stock</Label>
+                  <Input
+                    id="stock"
+                    type="number"
+                    {...form.register("stock", { valueAsNumber: true })}
+                    placeholder="10"
+                    data-testid="input-product-stock"
+                  />
+                </div>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="description">Description</Label>
@@ -138,13 +256,25 @@ export default function Products() {
                   data-testid="input-product-description"
                 />
               </div>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="active">Actif</Label>
+                <Switch
+                  id="active"
+                  checked={form.watch("active")}
+                  onCheckedChange={(checked) => form.setValue("active", checked)}
+                />
+              </div>
               <Button
                 type="submit"
                 className="w-full"
-                disabled={createMutation.isPending}
+                disabled={createMutation.isPending || updateMutation.isPending}
                 data-testid="button-submit-product"
               >
-                {createMutation.isPending ? "Cr\u00e9ation..." : "Cr\u00e9er le produit"}
+                {createMutation.isPending || updateMutation.isPending
+                  ? "Enregistrement..."
+                  : editingProduct
+                  ? "Mettre à jour"
+                  : "Créer le produit"}
               </Button>
             </form>
           </DialogContent>
@@ -169,16 +299,25 @@ export default function Products() {
           <div>
             <h3 className="font-semibold">Aucun produit</h3>
             <p className="text-sm text-muted-foreground mt-1">
-              Ajoutez vos premiers produits pour commencer &agrave; vendre en live.
+              Ajoutez vos premiers produits pour commencer à vendre en live.
             </p>
           </div>
         </Card>
       ) : (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {products?.map((product) => (
-            <Card key={product.id} className="p-4 hover-elevate" data-testid={`card-product-${product.id}`}>
+          {products?.map((product) => {
+            const availableStock = product.stock - (product.reservedStock || 0);
+            const isLowStock = availableStock <= 3 && product.active;
+            return (
+            <Card key={product.id} className={`p-4 hover-elevate ${isLowStock ? "border-amber-300" : ""}`} data-testid={`card-product-${product.id}`}>
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Badge variant="outline" className="font-mono text-xs">
+                      {product.keyword}
+                    </Badge>
+                    {!product.active && <Badge variant="secondary">Inactif</Badge>}
+                  </div>
                   <h3 className="font-semibold truncate" data-testid={`text-product-name-${product.id}`}>
                     {product.name}
                   </h3>
@@ -187,9 +326,21 @@ export default function Products() {
                   </p>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
-                  <Badge variant={product.active ? "default" : "secondary"} className="text-xs">
-                    {product.active ? "Actif" : "Inactif"}
-                  </Badge>
+                  <Switch
+                    checked={product.active}
+                    onCheckedChange={(checked) =>
+                      toggleActiveMutation.mutate({ id: product.id, active: checked })
+                    }
+                    disabled={toggleActiveMutation.isPending}
+                  />
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    onClick={() => handleOpenEdit(product)}
+                    data-testid={`button-edit-product-${product.id}`}
+                  >
+                    <Pencil className="w-4 h-4 text-muted-foreground" />
+                  </Button>
                   <Button
                     size="icon"
                     variant="ghost"
@@ -201,11 +352,17 @@ export default function Products() {
                   </Button>
                 </div>
               </div>
+              <div className="flex items-center justify-between mt-3 pt-3 border-t">
+                <span className="text-sm text-muted-foreground">Stock</span>
+                <span className={`font-bold ${isLowStock ? "text-amber-600" : availableStock > 0 ? "text-green-600" : "text-red-600"}`}>
+                  {availableStock} {product.reservedStock > 0 && <span className="text-xs font-normal text-muted-foreground">({product.reservedStock} réservé)</span>}
+                </span>
+              </div>
               {product.description && (
                 <p className="text-sm text-muted-foreground mt-2 line-clamp-2">{product.description}</p>
               )}
             </Card>
-          ))}
+          )})}
         </div>
       )}
     </div>

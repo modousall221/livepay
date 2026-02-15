@@ -1,10 +1,11 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { setupAuth, registerAuthRoutes, isAuthenticated } from "./replit_integrations/auth";
-import { authStorage } from "./replit_integrations/auth/storage";
+import { setupAuth, registerAuthRoutes, isAuthenticated, authStorage } from "./auth";
 import { insertProductSchema, insertLiveSessionSchema, insertInvoiceSchema } from "@shared/schema";
 import { getPaymentProvider, getAvailableProviders } from "./payment-providers";
+import { whatsappService } from "./whatsapp/service";
+import type { WhatsAppWebhookPayload } from "./whatsapp/types";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -15,7 +16,7 @@ export async function registerRoutes(
 
   app.get("/api/products", isAuthenticated, async (req: any, res) => {
     try {
-      const vendorId = req.user.claims.sub;
+      const vendorId = (req.user as any).id;
       const products = await storage.getProductsByVendor(vendorId);
       res.json(products);
     } catch (error) {
@@ -26,7 +27,7 @@ export async function registerRoutes(
 
   app.post("/api/products", isAuthenticated, async (req: any, res) => {
     try {
-      const vendorId = req.user.claims.sub;
+      const vendorId = (req.user as any).id;
       const parsed = insertProductSchema.safeParse(req.body);
       if (!parsed.success) {
         return res.status(400).json({ message: "Invalid product data", errors: parsed.error.errors });
@@ -39,9 +40,27 @@ export async function registerRoutes(
     }
   });
 
+  app.patch("/api/products/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const vendorId = (req.user as any).id;
+      const parsed = insertProductSchema.partial().safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid product data", errors: parsed.error.errors });
+      }
+      const product = await storage.updateProduct(req.params.id, vendorId, parsed.data);
+      if (!product) {
+        return res.status(404).json({ message: "Product not found" });
+      }
+      res.json(product);
+    } catch (error) {
+      console.error("Error updating product:", error);
+      res.status(500).json({ message: "Failed to update product" });
+    }
+  });
+
   app.delete("/api/products/:id", isAuthenticated, async (req: any, res) => {
     try {
-      const vendorId = req.user.claims.sub;
+      const vendorId = (req.user as any).id;
       await storage.deleteProduct(req.params.id, vendorId);
       res.json({ success: true });
     } catch (error) {
@@ -52,7 +71,7 @@ export async function registerRoutes(
 
   app.get("/api/sessions", isAuthenticated, async (req: any, res) => {
     try {
-      const vendorId = req.user.claims.sub;
+      const vendorId = (req.user as any).id;
       const sessions = await storage.getSessionsByVendor(vendorId);
       res.json(sessions);
     } catch (error) {
@@ -63,7 +82,7 @@ export async function registerRoutes(
 
   app.get("/api/sessions/:id", isAuthenticated, async (req: any, res) => {
     try {
-      const vendorId = req.user.claims.sub;
+      const vendorId = (req.user as any).id;
       const session = await storage.getSession(req.params.id, vendorId);
       if (!session) {
         return res.status(404).json({ message: "Session not found" });
@@ -77,7 +96,7 @@ export async function registerRoutes(
 
   app.post("/api/sessions", isAuthenticated, async (req: any, res) => {
     try {
-      const vendorId = req.user.claims.sub;
+      const vendorId = (req.user as any).id;
       const parsed = insertLiveSessionSchema.safeParse(req.body);
       if (!parsed.success) {
         return res.status(400).json({ message: "Invalid session data", errors: parsed.error.errors });
@@ -92,7 +111,7 @@ export async function registerRoutes(
 
   app.patch("/api/sessions/:id/end", isAuthenticated, async (req: any, res) => {
     try {
-      const vendorId = req.user.claims.sub;
+      const vendorId = (req.user as any).id;
       const session = await storage.endSession(req.params.id, vendorId);
       if (!session) {
         return res.status(404).json({ message: "Session not found" });
@@ -106,7 +125,7 @@ export async function registerRoutes(
 
   app.get("/api/invoices", isAuthenticated, async (req: any, res) => {
     try {
-      const vendorId = req.user.claims.sub;
+      const vendorId = (req.user as any).id;
       const sessionId = req.query.sessionId as string | undefined;
       const invoices = await storage.getInvoicesByVendor(vendorId, sessionId);
       res.json(invoices);
@@ -118,7 +137,7 @@ export async function registerRoutes(
 
   app.post("/api/invoices", isAuthenticated, async (req: any, res) => {
     try {
-      const vendorId = req.user.claims.sub;
+      const vendorId = (req.user as any).id;
       const parsed = insertInvoiceSchema.safeParse(req.body);
       if (!parsed.success) {
         return res.status(400).json({ message: "Invalid invoice data", errors: parsed.error.errors });
@@ -346,6 +365,20 @@ export async function registerRoutes(
           `BIC-${chargeId}`
         );
         console.log(`[Bictorys Webhook] Invoice ${invoice.id} marked as paid`);
+
+        // Envoyer notification WhatsApp automatique au client
+        try {
+          await whatsappService.notifyPaymentReceived({
+            id: invoice.id,
+            clientPhone: invoice.clientPhone,
+            clientName: invoice.clientName,
+            productName: invoice.productName,
+            amount: invoice.amount,
+          });
+          console.log(`[Bictorys Webhook] WhatsApp notification sent to ${invoice.clientPhone}`);
+        } catch (waError) {
+          console.error("[Bictorys Webhook] Failed to send WhatsApp notification:", waError);
+        }
       } else if (event === "charge.failed" || status === "failed") {
         console.log(`[Bictorys Webhook] Invoice ${invoice.id} payment failed`);
       }
@@ -414,34 +447,420 @@ export async function registerRoutes(
     res.sendStatus(403);
   });
 
+  // Webhook WhatsApp - Traitement des messages entrants
   app.post("/api/webhooks/whatsapp", async (req, res) => {
     try {
+      // Répondre immédiatement pour éviter les timeouts Meta
       res.sendStatus(200);
 
-      const body = req.body;
+      // Vérifier la signature (optionnel en dev)
+      const signature = req.headers["x-hub-signature-256"] as string;
+      if (process.env.WHATSAPP_APP_SECRET && signature) {
+        const isValid = whatsappService.verifyWebhookSignature(
+          JSON.stringify(req.body),
+          signature
+        );
+        if (!isValid) {
+          console.warn("[WhatsApp] Invalid webhook signature");
+          return;
+        }
+      }
+
+      const body = req.body as WhatsAppWebhookPayload;
       if (!body?.entry) return;
 
       for (const entry of body.entry) {
         const changes = entry.changes || [];
         for (const change of changes) {
           if (change.field !== "messages") continue;
+          
+          const phoneNumberId = change.value?.metadata?.phone_number_id;
+          const contacts = change.value?.contacts || [];
           const messages = change.value?.messages || [];
+
           for (const msg of messages) {
-            if (msg.type !== "text") continue;
-            const text = (msg.text?.body || "").trim().toLowerCase();
-            const from = msg.from;
+            // Trouver le contact associé
+            const contact = contacts.find((c) => c.wa_id === msg.from);
+            const contactInfo = {
+              phone: msg.from,
+              name: contact?.profile?.name,
+            };
 
-            const keywords = ["je prends", "je veux", "commander", "acheter", "payer"];
-            const matched = keywords.some((kw) => text.includes(kw));
+            // Traiter le message via le service
+            await whatsappService.processIncomingMessage(msg, contactInfo, phoneNumberId || "");
+          }
 
-            if (matched) {
-              console.log(`[WhatsApp Bot] Order intent from ${from}: "${text}"`);
-            }
+          // Traiter les statuts de messages (sent, delivered, read)
+          const statuses = change.value?.statuses || [];
+          for (const status of statuses) {
+            console.log(`[WhatsApp] Message ${status.id} status: ${status.status}`);
           }
         }
       }
     } catch (error) {
       console.error("WhatsApp webhook error:", error);
+    }
+  });
+
+  // API pour envoyer un message WhatsApp manuellement
+  app.post("/api/whatsapp/send", isAuthenticated, async (req: any, res) => {
+    try {
+      const { to, message } = req.body;
+      if (!to || !message) {
+        return res.status(400).json({ message: "Phone number and message required" });
+      }
+
+      const result = await whatsappService.sendText(to, message);
+      if (result.success) {
+        res.json({ success: true, messageId: result.messageId });
+      } else {
+        res.status(500).json({ success: false, error: "Failed to send message" });
+      }
+    } catch (error) {
+      console.error("Error sending WhatsApp message:", error);
+      res.status(500).json({ message: "Failed to send message" });
+    }
+  });
+
+  // API pour envoyer un lien de paiement via WhatsApp
+  app.post("/api/whatsapp/send-payment-link", isAuthenticated, async (req: any, res) => {
+    try {
+      const { invoiceId } = req.body;
+      if (!invoiceId) {
+        return res.status(400).json({ message: "Invoice ID required" });
+      }
+
+      const invoice = await storage.getInvoiceById(invoiceId);
+      if (!invoice) {
+        return res.status(404).json({ message: "Invoice not found" });
+      }
+
+      // Vérifier que l'utilisateur est le propriétaire
+      const vendorId = (req.user as any).id;
+      if (invoice.vendorId !== vendorId) {
+        return res.status(403).json({ message: "Unauthorized" });
+      }
+
+      const appHost = process.env.APP_HOST || 
+        (process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : `http://localhost:5000`);
+
+      const result = await whatsappService.sendPaymentLink(
+        invoice.clientPhone,
+        {
+          clientName: invoice.clientName,
+          productName: invoice.productName,
+          amount: invoice.amount,
+          token: invoice.token,
+          expiresAt: invoice.expiresAt,
+        },
+        appHost
+      );
+
+      if (result.success) {
+        res.json({ success: true, messageId: result.messageId });
+      } else {
+        res.status(500).json({ success: false, error: "Failed to send payment link" });
+      }
+    } catch (error) {
+      console.error("Error sending payment link via WhatsApp:", error);
+      res.status(500).json({ message: "Failed to send payment link" });
+    }
+  });
+
+  // API pour notifier un paiement reçu via WhatsApp
+  app.post("/api/whatsapp/notify-payment", isAuthenticated, async (req: any, res) => {
+    try {
+      const { invoiceId } = req.body;
+      if (!invoiceId) {
+        return res.status(400).json({ message: "Invoice ID required" });
+      }
+
+      const invoice = await storage.getInvoiceById(invoiceId);
+      if (!invoice || invoice.status !== "paid") {
+        return res.status(404).json({ message: "Paid invoice not found" });
+      }
+
+      await whatsappService.notifyPaymentReceived({
+        id: invoice.id,
+        clientPhone: invoice.clientPhone,
+        clientName: invoice.clientName,
+        productName: invoice.productName,
+        amount: invoice.amount,
+      });
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error notifying payment:", error);
+      res.status(500).json({ message: "Failed to notify payment" });
+    }
+  });
+
+  // API pour envoyer le catalogue via WhatsApp
+  app.post("/api/whatsapp/send-catalog", isAuthenticated, async (req: any, res) => {
+    try {
+      const { to } = req.body;
+      const vendorId = (req.user as any).id;
+
+      if (!to) {
+        return res.status(400).json({ message: "Phone number required" });
+      }
+
+      const productsList = await storage.getProductsByVendor(vendorId);
+      const activeProducts = productsList.filter((p) => p.active);
+
+      if (activeProducts.length === 0) {
+        return res.status(400).json({ message: "No active products" });
+      }
+
+      const result = await whatsappService.sendProductList(
+        to,
+        activeProducts.map((p) => ({
+          id: p.id,
+          name: p.name,
+          price: p.price,
+          description: p.description || undefined,
+        })),
+        "📦 Catalogue"
+      );
+
+      if (result.success) {
+        res.json({ success: true, messageId: result.messageId });
+      } else {
+        res.status(500).json({ success: false, error: "Failed to send catalog" });
+      }
+    } catch (error) {
+      console.error("Error sending catalog:", error);
+      res.status(500).json({ message: "Failed to send catalog" });
+    }
+  });
+
+  // ========== ORDER ROUTES (WhatsApp Bot Flow) ==========
+
+  // Get order by payment token (for payment page)
+  app.get("/api/orders/pay/:token", async (req, res) => {
+    try {
+      const order = await storage.getOrderByToken(req.params.token);
+      if (!order) {
+        return res.status(404).json({ message: "Order not found" });
+      }
+
+      if (order.status === "reserved" && order.expiresAt && new Date() > new Date(order.expiresAt)) {
+        await storage.releaseStock(order.productId, order.quantity);
+        await storage.expireOrder(order.id);
+        return res.json({ ...order, status: "expired" });
+      }
+
+      const vendor = await authStorage.getUser(order.vendorId);
+
+      res.json({
+        id: order.id,
+        productName: order.productName,
+        quantity: order.quantity,
+        unitPrice: order.unitPrice,
+        totalAmount: order.totalAmount,
+        clientName: order.clientName,
+        status: order.status,
+        expiresAt: order.expiresAt,
+        paymentMethod: order.paymentMethod,
+        vendorName: vendor
+          ? `${vendor.firstName || ""} ${vendor.lastName || ""}`.trim() || vendor.email || "Vendeur"
+          : "Vendeur",
+      });
+    } catch (error) {
+      console.error("Error fetching order:", error);
+      res.status(500).json({ message: "Failed to fetch order" });
+    }
+  });
+
+  // Process order payment
+  app.post("/api/orders/pay/:token", async (req, res) => {
+    try {
+      const order = await storage.getOrderByToken(req.params.token);
+      if (!order) {
+        return res.status(404).json({ message: "Order not found" });
+      }
+
+      if (order.status === "paid") {
+        return res.status(400).json({ message: "Already paid" });
+      }
+
+      if (order.expiresAt && new Date() > new Date(order.expiresAt)) {
+        await storage.releaseStock(order.productId, order.quantity);
+        await storage.expireOrder(order.id);
+        return res.status(400).json({ message: "Order expired" });
+      }
+
+      const paymentMethod = req.body?.paymentMethod || "wave";
+      const provider = getPaymentProvider(paymentMethod);
+      if (!provider) {
+        return res.status(400).json({ message: "Invalid payment method" });
+      }
+
+      if (paymentMethod === "cash") {
+        await storage.confirmStock(order.productId, order.quantity);
+        const updated = await storage.updateOrderStatus(order.id, "paid", "CASH");
+        
+        // Notify via WhatsApp
+        const vendorConfig = await storage.getVendorConfig(order.vendorId);
+        if (updated) {
+          await whatsappService.notifyPaymentReceived(updated, vendorConfig || undefined);
+        }
+        
+        return res.json({ success: true, order: updated });
+      }
+
+      const result = await provider.processPayment(order.id, order.totalAmount, {
+        clientName: order.clientName || "Client",
+        clientPhone: order.clientPhone,
+        productName: order.productName,
+        invoiceToken: order.paymentToken,
+      });
+
+      if (!result.success) {
+        return res.status(400).json({ message: result.error || "Payment failed" });
+      }
+
+      if (result.chargeId && result.redirectUrl) {
+        await storage.updateOrderPaymentInfo(order.id, result.redirectUrl, paymentMethod);
+        return res.json({
+          success: true,
+          redirect: true,
+          redirectUrl: result.redirectUrl,
+          chargeId: result.chargeId,
+        });
+      }
+
+      await storage.confirmStock(order.productId, order.quantity);
+      const updated = await storage.updateOrderStatus(order.id, "paid", result.providerRef);
+      
+      const vendorConfig = await storage.getVendorConfig(order.vendorId);
+      if (updated) {
+        await whatsappService.notifyPaymentReceived(updated, vendorConfig || undefined);
+      }
+      
+      res.json({ success: true, order: updated });
+    } catch (error) {
+      console.error("Error processing order payment:", error);
+      res.status(500).json({ message: "Failed to process payment" });
+    }
+  });
+
+  // Check order payment status
+  app.get("/api/orders/pay/:token/status", async (req, res) => {
+    try {
+      const order = await storage.getOrderByToken(req.params.token);
+      if (!order) {
+        return res.status(404).json({ message: "Order not found" });
+      }
+
+      if (order.status === "reserved" && order.expiresAt && new Date() > new Date(order.expiresAt)) {
+        await storage.releaseStock(order.productId, order.quantity);
+        await storage.expireOrder(order.id);
+        return res.json({ status: "expired" });
+      }
+
+      res.json({ status: order.status });
+    } catch (error) {
+      console.error("Error checking order status:", error);
+      res.status(500).json({ message: "Failed to check status" });
+    }
+  });
+
+  // Get vendor orders
+  app.get("/api/orders", isAuthenticated, async (req: any, res) => {
+    try {
+      const vendorId = (req.user as any).id;
+      const status = req.query.status as string | undefined;
+      const orders = await storage.getOrdersByVendor(vendorId, status);
+      res.json(orders);
+    } catch (error) {
+      console.error("Error fetching orders:", error);
+      res.status(500).json({ message: "Failed to fetch orders" });
+    }
+  });
+
+  // Get order stats
+  app.get("/api/orders/stats", isAuthenticated, async (req: any, res) => {
+    try {
+      const vendorId = (req.user as any).id;
+      const sessionId = req.query.sessionId as string | undefined;
+      const stats = await storage.getOrderStats(vendorId, sessionId);
+      res.json(stats);
+    } catch (error) {
+      console.error("Error fetching order stats:", error);
+      res.status(500).json({ message: "Failed to fetch stats" });
+    }
+  });
+
+  // Toggle live mode
+  app.post("/api/vendor/live-mode", isAuthenticated, async (req: any, res) => {
+    try {
+      const user = req.user as any;
+      const vendorId = user.id;
+      const { liveMode } = req.body;
+      
+      if (typeof liveMode !== "boolean") {
+        return res.status(400).json({ message: "liveMode must be a boolean" });
+      }
+
+      let config = await storage.getVendorConfig(vendorId);
+      if (!config) {
+        const businessName = user.businessName || `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email;
+        config = await storage.createVendorConfig({ vendorId, businessName, liveMode });
+      } else {
+        config = await storage.setLiveMode(vendorId, liveMode);
+      }
+
+      res.json({ success: true, liveMode: config?.liveMode });
+    } catch (error) {
+      console.error("Error toggling live mode:", error);
+      res.status(500).json({ message: "Failed to toggle live mode" });
+    }
+  });
+
+  // Get vendor config
+  app.get("/api/vendor/config", isAuthenticated, async (req: any, res) => {
+    try {
+      const user = req.user as any;
+      const vendorId = user.id;
+      let config = await storage.getVendorConfig(vendorId);
+      
+      if (!config) {
+        const businessName = user.businessName || `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email;
+        config = await storage.createVendorConfig({ vendorId, businessName, liveMode: false });
+      }
+
+      res.json(config);
+    } catch (error) {
+      console.error("Error fetching vendor config:", error);
+      res.status(500).json({ message: "Failed to fetch config" });
+    }
+  });
+
+  // Update vendor config
+  app.patch("/api/vendor/config", isAuthenticated, async (req: any, res) => {
+    try {
+      const user = req.user as any;
+      const vendorId = user.id;
+      const { welcomeMessage, reservationDurationMinutes, autoReplyEnabled } = req.body;
+      
+      const updateData: Record<string, any> = {};
+      if (welcomeMessage !== undefined) updateData.welcomeMessage = welcomeMessage;
+      if (reservationDurationMinutes !== undefined) updateData.reservationDurationMinutes = reservationDurationMinutes;
+      if (autoReplyEnabled !== undefined) updateData.autoReplyEnabled = autoReplyEnabled;
+
+      let config = await storage.getVendorConfig(vendorId);
+      if (!config) {
+        const businessName = user.businessName || `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email;
+        config = await storage.createVendorConfig({ vendorId, businessName, ...updateData });
+      } else {
+        config = await storage.updateVendorConfig(vendorId, updateData);
+      }
+
+      res.json(config);
+    } catch (error) {
+      console.error("Error updating vendor config:", error);
+      res.status(500).json({ message: "Failed to update config" });
     }
   });
 

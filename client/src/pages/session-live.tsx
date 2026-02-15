@@ -27,10 +27,11 @@ import { insertInvoiceSchema, type Invoice, type Product, type LiveSession } fro
 import { Plus, Radio, Copy, ExternalLink, ArrowLeft, RefreshCw, QrCode, MessageCircle, Check } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { isUnauthorizedError } from "@/lib/auth-utils";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRoute, useLocation } from "wouter";
 import { z } from "zod";
 import { QRCodeDisplay, InlineQR } from "@/components/qr-code";
+import { usePaymentNotification } from "@/hooks/use-payment-notification";
 
 const invoiceFormSchema = z.object({
   clientName: z.string().min(1, "Nom du client requis"),
@@ -104,6 +105,13 @@ export default function SessionLive() {
   const [qrDialogToken, setQrDialogToken] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const sessionId = params?.id;
+  const previousPaidIdsRef = useRef<Set<string>>(new Set());
+  const { showNotification, requestPermission } = usePaymentNotification();
+
+  // Request notification permission on mount
+  useEffect(() => {
+    requestPermission();
+  }, [requestPermission]);
 
   const { data: session, isLoading: loadingSession } = useQuery<LiveSession>({
     queryKey: ["/api/sessions", sessionId],
@@ -124,6 +132,35 @@ export default function SessionLive() {
     enabled: !!sessionId,
     refetchInterval: session?.active ? 5000 : false,
   });
+
+  // Detect new paid invoices and play notification sound
+  useEffect(() => {
+    if (!invoices) return;
+    
+    const currentPaidIds = new Set(
+      invoices.filter((inv) => inv.status === "paid").map((inv) => inv.id)
+    );
+    
+    // Find newly paid invoices
+    currentPaidIds.forEach((id) => {
+      if (!previousPaidIdsRef.current.has(id)) {
+        const invoice = invoices.find((inv) => inv.id === id);
+        if (invoice && previousPaidIdsRef.current.size > 0) {
+          // Only notify if this isn't the initial load
+          showNotification(
+            "🎉 Paiement reçu!",
+            `${invoice.clientName} a payé ${invoice.amount.toLocaleString("fr-FR")} FCFA pour ${invoice.productName}`
+          );
+          toast({
+            title: "🎉 Paiement reçu!",
+            description: `${invoice.clientName} - ${invoice.amount.toLocaleString("fr-FR")} FCFA`,
+          });
+        }
+      }
+    });
+    
+    previousPaidIdsRef.current = currentPaidIds;
+  }, [invoices, showNotification, toast]);
 
   const form = useForm<InvoiceFormData>({
     resolver: zodResolver(invoiceFormSchema),

@@ -16,7 +16,7 @@ LivePay is a real-time payment infrastructure for live commerce in the UEMOA zon
 ## Key Features
 - **PWA (Progressive Web App)** - Installable on mobile comme une app native
 - Vendor authentication via Replit Auth
-- Product catalog management (CRUD)
+- Product catalog management (CRUD with edit and toggle active)
 - Live session creation and management
 - Instant invoice generation with secure token links
 - QR code generation per invoice (inline preview, download, OBS overlay)
@@ -33,6 +33,13 @@ LivePay is a real-time payment infrastructure for live commerce in the UEMOA zon
 - WhatsApp chatbot webhook skeleton (message parsing, keyword detection)
 - Dark mode support
 - Demo/test page at /demo with instructions for both experiences
+
+### New Features (v2)
+- **Advanced Analytics Dashboard** - Revenue charts, conversion rates, top selling products, session stats
+- **Payment Notifications** - Sound alerts and browser notifications when payments are received
+- **Vendor Settings** - Customizable preferences (invoice expiration, notification volume, default payment method)
+- **Session Summary** - Detailed summary modal when ending a live session (revenue, conversion rate, duration)
+- **Product Edit** - Full CRUD for products including update and toggle active status
 
 ## Payment Flow
 1. Client selects payment method (Wave, Orange Money, Card, Cash)
@@ -52,19 +59,24 @@ client/src/
     qr-code.tsx        - QR code display + inline QR components
     theme-provider.tsx - Dark/light theme
     theme-toggle.tsx   - Theme toggle button
+    install-prompt.tsx - PWA install prompt
     ui/                - shadcn/ui components
   pages/
     landing.tsx        - Landing page (unauthenticated)
     dashboard.tsx      - Vendor dashboard
-    products.tsx       - Product catalog
-    sessions.tsx       - Live sessions list
-    session-live.tsx   - Active session with invoice generation, QR codes, WhatsApp share
+    products.tsx       - Product catalog (CRUD with edit functionality)
+    sessions.tsx       - Live sessions list with session summary on end
+    session-live.tsx   - Active session with invoice generation, QR codes, WhatsApp share, payment notifications
     invoices.tsx       - All invoices list
+    analytics.tsx      - Advanced analytics with charts (revenue, conversion rates, top products)
+    settings.tsx       - Vendor preferences (notifications, invoice expiration, etc.)
     pay.tsx            - Client payment page with Bictorys redirect (public)
     qr-overlay.tsx     - QR code overlay for OBS streaming (public)
+    demo.tsx           - Demo page with instructions
   hooks/
     use-auth.ts        - Auth hook
     use-toast.ts       - Toast notifications
+    use-payment-notification.ts - Sound and browser notifications for payments
   lib/
     queryClient.ts     - TanStack Query config
     auth-utils.ts      - Auth utilities
@@ -72,7 +84,7 @@ client/src/
 server/
   index.ts             - Express server entry
   routes.ts            - API routes (Bictorys webhook, WhatsApp webhook, OG tags)
-  storage.ts           - Database storage layer
+  storage.ts           - Database storage layer (includes updateProduct)
   payment-providers.ts - Bictorys PSP integration (Wave, Orange Money, Card, Cash)
   db.ts                - Database connection
   replit_integrations/  - Auth module
@@ -85,6 +97,7 @@ shared/
 ## API Endpoints
 - `GET /api/auth/user` - Current user
 - `GET/POST /api/products` - Product CRUD
+- `PATCH /api/products/:id` - Update product
 - `DELETE /api/products/:id` - Delete product
 - `GET/POST /api/sessions` - Session CRUD
 - `GET /api/sessions/:id` - Get session (vendor-scoped)

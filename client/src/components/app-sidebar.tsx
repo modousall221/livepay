@@ -11,16 +11,17 @@ import {
   SidebarFooter,
 } from "@/components/ui/sidebar";
 import { Link, useLocation } from "wouter";
-import { LayoutDashboard, Package, Radio, FileText, LogOut } from "lucide-react";
+import { LayoutDashboard, Package, ShoppingCart, LogOut, Settings, MessageCircle } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 
+// Navigation simplifiée MVP - 4 items essentiels
 const navItems = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
   { title: "Produits", url: "/products", icon: Package },
-  { title: "Sessions Live", url: "/sessions", icon: Radio },
-  { title: "Factures", url: "/invoices", icon: FileText },
+  { title: "Commandes", url: "/orders", icon: ShoppingCart },
+  { title: "Paramètres", url: "/settings", icon: Settings },
 ];
 
 export function AppSidebar() {
@@ -35,8 +36,8 @@ export function AppSidebar() {
     <Sidebar>
       <SidebarHeader className="p-4">
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-md bg-primary flex items-center justify-center shrink-0">
-            <Radio className="w-4 h-4 text-primary-foreground" />
+          <div className="w-8 h-8 rounded-md bg-green-600 flex items-center justify-center shrink-0">
+            <MessageCircle className="w-4 h-4 text-white" />
           </div>
           <span className="text-lg font-semibold tracking-tight">LivePay</span>
         </div>
@@ -78,7 +79,7 @@ export function AppSidebar() {
           <Button
             size="icon"
             variant="ghost"
-            onClick={() => (window.location.href = "/api/logout")}
+            onClick={() => logout()}
             data-testid="button-logout"
           >
             <LogOut className="w-4 h-4" />

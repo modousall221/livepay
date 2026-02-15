@@ -11,14 +11,13 @@ import { useAuth } from "@/hooks/use-auth";
 import { Skeleton } from "@/components/ui/skeleton";
 import NotFound from "@/pages/not-found";
 import Landing from "@/pages/landing";
+import Login from "@/pages/login";
+import Register from "@/pages/register";
 import Dashboard from "@/pages/dashboard";
 import Products from "@/pages/products";
-import Sessions from "@/pages/sessions";
-import SessionLive from "@/pages/session-live";
-import Invoices from "@/pages/invoices";
+import Orders from "@/pages/orders";
+import Settings from "@/pages/settings";
 import Pay from "@/pages/pay";
-import QROverlay from "@/pages/qr-overlay";
-import Demo from "@/pages/demo";
 import { InstallPrompt } from "@/components/install-prompt";
 
 function AuthenticatedRouter() {
@@ -40,9 +39,8 @@ function AuthenticatedRouter() {
             <Switch>
               <Route path="/" component={Dashboard} />
               <Route path="/products" component={Products} />
-              <Route path="/sessions" component={Sessions} />
-              <Route path="/sessions/:id" component={SessionLive} />
-              <Route path="/invoices" component={Invoices} />
+              <Route path="/orders" component={Orders} />
+              <Route path="/settings" component={Settings} />
               <Route component={NotFound} />
             </Switch>
           </main>
@@ -70,8 +68,12 @@ function AppRouter() {
     <>
       <Switch>
         <Route path="/pay/:token" component={Pay} />
-        <Route path="/qr/:token" component={QROverlay} />
-        <Route path="/demo" component={Demo} />
+        <Route path="/login">
+          {user ? <AuthenticatedRouter /> : <Login />}
+        </Route>
+        <Route path="/register">
+          {user ? <AuthenticatedRouter /> : <Register />}
+        </Route>
         <Route>
           {user ? <AuthenticatedRouter /> : <Landing />}
         </Route>

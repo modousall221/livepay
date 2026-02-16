@@ -405,7 +405,10 @@ Vous pouvez repasser commande à tout moment.`,
   });
 
   const isWhatsAppConfigured = !!(config.whatsappPhoneNumberId && config.whatsappAccessToken);
-  const webhookUrl = `${window.location.origin}/api/whatsapp/webhook`;
+  const isProduction = window.location.hostname !== 'localhost';
+  const webhookUrl = isProduction 
+    ? `${window.location.origin}/api/webhooks/whatsapp`
+    : "https://livepay.tech/api/webhooks/whatsapp";
 
   return (
     <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -515,25 +518,51 @@ Vous pouvez repasser commande à tout moment.`,
                   onChange={(e) => setConfig({ ...config, whatsappVerifyToken: e.target.value })}
                   placeholder="livepay_webhook_verify"
                 />
+                <p className="text-xs text-muted-foreground">
+                  Token simple pour la vérification Meta (ex: livepay_webhook_verify)
+                </p>
               </div>
 
               {/* Webhook URL */}
-              <div className="p-3 bg-muted/50 rounded-lg space-y-2">
-                <Label className="text-xs text-muted-foreground">URL Webhook (à configurer dans Meta)</Label>
-                <div className="flex items-center gap-2">
-                  <code className="flex-1 text-xs bg-background p-2 rounded border overflow-x-auto">
-                    {webhookUrl}
-                  </code>
-                  <Button 
-                    variant="outline" 
-                    size="sm"
-                    onClick={() => {
-                      navigator.clipboard.writeText(webhookUrl);
-                      toast({ title: "Copié !" });
-                    }}
-                  >
-                    <Copy className="w-3 h-3" />
-                  </Button>
+              <div className="p-3 bg-blue-50 dark:bg-blue-950/30 rounded-lg space-y-2 border border-blue-200 dark:border-blue-800">
+                <Label className="text-xs font-medium text-blue-700 dark:text-blue-400">Configuration Meta WhatsApp</Label>
+                <div className="space-y-2">
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1">URL de rappel :</p>
+                    <div className="flex items-center gap-2">
+                      <code className="flex-1 text-xs bg-background p-2 rounded border overflow-x-auto">
+                        {webhookUrl}
+                      </code>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => {
+                          navigator.clipboard.writeText(webhookUrl);
+                          toast({ title: "Copié !" });
+                        }}
+                      >
+                        <Copy className="w-3 h-3" />
+                      </Button>
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1">Vérifier le token :</p>
+                    <div className="flex items-center gap-2">
+                      <code className="flex-1 text-xs bg-background p-2 rounded border">
+                        {config.whatsappVerifyToken || "livepay_webhook_verify"}
+                      </code>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => {
+                          navigator.clipboard.writeText(config.whatsappVerifyToken || "livepay_webhook_verify");
+                          toast({ title: "Copié !" });
+                        }}
+                      >
+                        <Copy className="w-3 h-3" />
+                      </Button>
+                    </div>
+                  </div>
                 </div>
               </div>
 

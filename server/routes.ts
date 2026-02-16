@@ -1003,7 +1003,9 @@ export async function registerRoutes(
         whatsappVerifyToken,
         autoReminderEnabled,
         segment,
-        businessName
+        businessName,
+        mobileMoneyNumber,
+        preferredPaymentMethod
       } = req.body;
       
       const updateData: Record<string, any> = {};
@@ -1016,6 +1018,8 @@ export async function registerRoutes(
       if (autoReminderEnabled !== undefined) updateData.autoReminderEnabled = autoReminderEnabled;
       if (segment !== undefined) updateData.segment = segment;
       if (businessName !== undefined) updateData.businessName = businessName;
+      if (mobileMoneyNumber !== undefined) updateData.mobileMoneyNumber = mobileMoneyNumber;
+      if (preferredPaymentMethod !== undefined) updateData.preferredPaymentMethod = preferredPaymentMethod;
 
       let config = await storage.getVendorConfig(vendorId);
       if (!config) {

@@ -18,11 +18,31 @@ import {
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { insertProductSchema, type Product, type InsertProduct } from "@shared/schema";
-import { Plus, Package, Trash2, Pencil, Share2, QrCode } from "lucide-react";
+import { Plus, Package, Trash2, Pencil, Share2, QrCode, Star, ImageIcon, Video, Tag, Percent } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { isUnauthorizedError } from "@/lib/auth-utils";
 import { useState, useEffect } from "react";
 import { ProductShareDialog } from "@/components/product-share-dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
+// Catégories prédéfinies
+const PRODUCT_CATEGORIES = [
+  { value: "mode", label: "Mode & Vêtements" },
+  { value: "accessoires", label: "Accessoires" },
+  { value: "beaute", label: "Beauté & Cosmétiques" },
+  { value: "electronique", label: "Électronique" },
+  { value: "maison", label: "Maison & Déco" },
+  { value: "alimentation", label: "Alimentation" },
+  { value: "sante", label: "Santé & Bien-être" },
+  { value: "sport", label: "Sport & Loisirs" },
+  { value: "autre", label: "Autre" },
+];
 
 export default function Products() {
   const { toast } = useToast();
@@ -48,6 +68,10 @@ export default function Products() {
       stock: 0,
       description: "",
       imageUrl: "",
+      videoUrl: "",
+      category: "",
+      originalPrice: 0,
+      featured: false,
       active: true,
     },
   });
@@ -62,6 +86,10 @@ export default function Products() {
         stock: editingProduct.stock || 0,
         description: editingProduct.description || "",
         imageUrl: editingProduct.imageUrl || "",
+        videoUrl: (editingProduct as any).videoUrl || "",
+        category: (editingProduct as any).category || "",
+        originalPrice: (editingProduct as any).originalPrice || 0,
+        featured: (editingProduct as any).featured || false,
         active: editingProduct.active,
       });
     } else if (!open) {
@@ -72,6 +100,10 @@ export default function Products() {
         stock: 0,
         description: "",
         imageUrl: "",
+        videoUrl: "",
+        category: "",
+        originalPrice: 0,
+        featured: false,
         active: true,
       });
     }
@@ -158,6 +190,10 @@ export default function Products() {
       stock: 0,
       description: "",
       imageUrl: "",
+      videoUrl: "",
+      category: "",
+      originalPrice: 0,
+      featured: false,
       active: true,
     });
     setOpen(true);
@@ -189,7 +225,7 @@ export default function Products() {
               Ajouter
             </Button>
           </DialogTrigger>
-          <DialogContent>
+          <DialogContent className="max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>{editingProduct ? "Modifier le produit" : "Nouveau produit"}</DialogTitle>
             </DialogHeader>
@@ -257,6 +293,102 @@ export default function Products() {
                   data-testid="input-product-description"
                 />
               </div>
+
+              {/* Category */}
+              <div className="space-y-2">
+                <Label htmlFor="category" className="flex items-center gap-2">
+                  <Tag className="w-4 h-4" />
+                  Catégorie
+                </Label>
+                <Select
+                  value={form.watch("category") || ""}
+                  onValueChange={(value) => form.setValue("category", value)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Choisir une catégorie" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PRODUCT_CATEGORIES.map((cat) => (
+                      <SelectItem key={cat.value} value={cat.value}>
+                        {cat.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Image URL with preview */}
+              <div className="space-y-2">
+                <Label htmlFor="imageUrl" className="flex items-center gap-2">
+                  <ImageIcon className="w-4 h-4" />
+                  Image du produit
+                </Label>
+                <Input
+                  id="imageUrl"
+                  {...form.register("imageUrl")}
+                  placeholder="https://exemple.com/image.jpg"
+                />
+                {form.watch("imageUrl") && (
+                  <div className="relative w-full h-32 bg-gray-100 rounded-lg overflow-hidden">
+                    <img
+                      src={form.watch("imageUrl")}
+                      alt="Aperçu"
+                      className="w-full h-full object-cover"
+                      onError={(e) => { (e.target as HTMLImageElement).src = ""; }}
+                    />
+                  </div>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  Collez l'URL d'une image hébergée (Google Drive, Imgur, etc.)
+                </p>
+              </div>
+
+              {/* Video URL */}
+              <div className="space-y-2">
+                <Label htmlFor="videoUrl" className="flex items-center gap-2">
+                  <Video className="w-4 h-4" />
+                  Vidéo du produit (optionnel)
+                </Label>
+                <Input
+                  id="videoUrl"
+                  {...form.register("videoUrl")}
+                  placeholder="https://tiktok.com/@... ou youtube.com/..."
+                />
+                <p className="text-xs text-muted-foreground">
+                  Lien TikTok, YouTube ou Reels Instagram
+                </p>
+              </div>
+
+              {/* Original Price (for promotions) */}
+              <div className="space-y-2">
+                <Label htmlFor="originalPrice" className="flex items-center gap-2">
+                  <Percent className="w-4 h-4" />
+                  Prix barré (optionnel)
+                </Label>
+                <Input
+                  id="originalPrice"
+                  type="number"
+                  {...form.register("originalPrice", { valueAsNumber: true })}
+                  placeholder="20000"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Ancien prix affiché barré pour montrer la promotion
+                </p>
+              </div>
+
+              {/* Featured toggle */}
+              <div className="flex items-center justify-between py-2 border rounded-lg px-3 bg-amber-50 dark:bg-amber-950/20">
+                <div className="flex items-center gap-2">
+                  <Star className="w-4 h-4 text-amber-500" />
+                  <Label htmlFor="featured">Produit vedette</Label>
+                </div>
+                <Switch
+                  id="featured"
+                  checked={form.watch("featured")}
+                  onCheckedChange={(checked) => form.setValue("featured", checked)}
+                />
+              </div>
+
               <div className="flex items-center justify-between">
                 <Label htmlFor="active">Actif</Label>
                 <Switch
@@ -309,33 +441,87 @@ export default function Products() {
           {products?.map((product) => {
             const availableStock = product.stock - (product.reservedStock || 0);
             const isLowStock = availableStock <= 3 && product.active;
+            const extProduct = product as any;
+            const categoryLabel = PRODUCT_CATEGORIES.find(c => c.value === extProduct.category)?.label;
             return (
-            <Card key={product.id} className={`p-4 hover-elevate ${isLowStock ? "border-amber-300" : ""}`} data-testid={`card-product-${product.id}`}>
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <Badge variant="outline" className="font-mono text-xs">
-                      {product.keyword}
-                    </Badge>
-                    {product.shareCode && (
-                      <Badge variant="secondary" className="font-mono text-xs">
-                        #{product.shareCode}
+            <Card key={product.id} className={`overflow-hidden hover-elevate ${isLowStock ? "border-amber-300" : ""} ${extProduct.featured ? "ring-2 ring-amber-400" : ""}`} data-testid={`card-product-${product.id}`}>
+              {/* Image thumbnail */}
+              {product.imageUrl ? (
+                <div className="relative h-32 bg-gray-100">
+                  <img
+                    src={product.imageUrl}
+                    alt={product.name}
+                    className="w-full h-full object-cover"
+                  />
+                  {extProduct.featured && (
+                    <div className="absolute top-2 left-2">
+                      <Badge className="bg-amber-500 text-white">
+                        <Star className="w-3 h-3 mr-1 fill-current" />
+                        Vedette
                       </Badge>
-                    )}
-                    {!product.active && <Badge variant="secondary">Inactif</Badge>}
-                  </div>
-                  <h3 className="font-semibold truncate" data-testid={`text-product-name-${product.id}`}>
-                    {product.name}
-                  </h3>
-                  <p className="text-lg font-bold text-primary mt-1">
-                    {product.price.toLocaleString("fr-FR")} F
-                  </p>
+                    </div>
+                  )}
+                  {extProduct.videoUrl && (
+                    <div className="absolute top-2 right-2">
+                      <Badge variant="secondary">
+                        <Video className="w-3 h-3 mr-1" />
+                        Vidéo
+                      </Badge>
+                    </div>
+                  )}
                 </div>
-                <div className="flex items-center gap-1 shrink-0">
-                  <ProductShareDialog
-                    productId={product.id}
-                    productName={product.name}
-                    trigger={
+              ) : (
+                <div className="relative h-24 bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-800 dark:to-gray-700 flex items-center justify-center">
+                  <Package className="w-8 h-8 text-gray-300" />
+                  {extProduct.featured && (
+                    <div className="absolute top-2 left-2">
+                      <Badge className="bg-amber-500 text-white">
+                        <Star className="w-3 h-3 mr-1 fill-current" />
+                        Vedette
+                      </Badge>
+                    </div>
+                  )}
+                </div>
+              )}
+              
+              <div className="p-4">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center flex-wrap gap-1 mb-1">
+                      <Badge variant="outline" className="font-mono text-xs">
+                        {product.keyword}
+                      </Badge>
+                      {product.shareCode && (
+                        <Badge variant="secondary" className="font-mono text-xs">
+                          #{product.shareCode}
+                        </Badge>
+                      )}
+                      {categoryLabel && (
+                        <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
+                          {categoryLabel}
+                        </Badge>
+                      )}
+                      {!product.active && <Badge variant="secondary">Inactif</Badge>}
+                    </div>
+                    <h3 className="font-semibold truncate" data-testid={`text-product-name-${product.id}`}>
+                      {product.name}
+                    </h3>
+                    <div className="flex items-center gap-2 mt-1">
+                      <p className="text-lg font-bold text-primary">
+                        {product.price.toLocaleString("fr-FR")} F
+                      </p>
+                      {extProduct.originalPrice > 0 && extProduct.originalPrice > product.price && (
+                        <p className="text-sm text-muted-foreground line-through">
+                          {extProduct.originalPrice.toLocaleString("fr-FR")} F
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <ProductShareDialog
+                      productId={product.id}
+                      productName={product.name}
+                      trigger={
                       <Button size="icon" variant="ghost" className="text-green-600 hover:text-green-700 hover:bg-green-50">
                         <QrCode className="w-4 h-4" />
                       </Button>
@@ -366,16 +552,17 @@ export default function Products() {
                     <Trash2 className="w-4 h-4 text-muted-foreground" />
                   </Button>
                 </div>
+                </div>
+                <div className="flex items-center justify-between mt-3 pt-3 border-t">
+                  <span className="text-sm text-muted-foreground">Stock</span>
+                  <span className={`font-bold ${isLowStock ? "text-amber-600" : availableStock > 0 ? "text-green-600" : "text-red-600"}`}>
+                    {availableStock} {product.reservedStock > 0 && <span className="text-xs font-normal text-muted-foreground">({product.reservedStock} réservé)</span>}
+                  </span>
+                </div>
+                {product.description && (
+                  <p className="text-sm text-muted-foreground mt-2 line-clamp-2">{product.description}</p>
+                )}
               </div>
-              <div className="flex items-center justify-between mt-3 pt-3 border-t">
-                <span className="text-sm text-muted-foreground">Stock</span>
-                <span className={`font-bold ${isLowStock ? "text-amber-600" : availableStock > 0 ? "text-green-600" : "text-red-600"}`}>
-                  {availableStock} {product.reservedStock > 0 && <span className="text-xs font-normal text-muted-foreground">({product.reservedStock} réservé)</span>}
-                </span>
-              </div>
-              {product.description && (
-                <p className="text-sm text-muted-foreground mt-2 line-clamp-2">{product.description}</p>
-              )}
             </Card>
           )})}
         </div>

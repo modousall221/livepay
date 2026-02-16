@@ -28,7 +28,12 @@ import {
   Zap,
   CheckCircle,
   AlertCircle,
-  Terminal
+  Terminal,
+  FileText,
+  ChevronDown,
+  ChevronUp,
+  RotateCcw,
+  Eye
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
@@ -138,6 +143,56 @@ export default function Settings() {
     autoReminderEnabled: true,
   });
 
+  // Message templates state
+  const [expandedTemplate, setExpandedTemplate] = useState<string | null>(null);
+  const [messageTemplates, setMessageTemplates] = useState({
+    paymentLink: {
+      header: "🧾 Facture LivePay",
+      body: `Bonjour {{clientName}} !
+
+*Produit:* {{productName}}
+*Montant:* {{amount}} FCFA
+
+⏱️ Ce lien expire dans {{expiresIn}} minutes
+
+👇 Cliquez pour payer en toute sécurité:
+{{paymentUrl}}`,
+      footer: "Paiement sécurisé via Wave, Orange Money ou Carte bancaire"
+    },
+    paymentConfirmed: {
+      header: "✅ Paiement confirmé !",
+      body: `Merci {{clientName}} !
+
+Votre paiement de *{{amount}} FCFA* pour "{{productName}}" a été reçu.
+
+🧾 Référence: #{{reference}}
+
+Le vendeur a été notifié et préparera votre commande.`,
+      footer: "Merci d'avoir utilisé LivePay ! 🎉"
+    },
+    paymentReminder: {
+      header: "⏰ Rappel de paiement",
+      body: `Bonjour {{clientName}},
+
+Votre facture pour "{{productName}}" ({{amount}} FCFA) est toujours en attente.
+
+Il vous reste {{remainingMinutes}} minutes pour finaliser le paiement:
+{{paymentUrl}}`,
+      footer: "Après expiration, le produit sera remis en vente"
+    },
+    orderExpired: {
+      header: "⌛ Commande expirée",
+      body: `Bonjour {{clientName}},
+
+Votre réservation pour "{{productName}}" a expiré car le paiement n'a pas été effectué dans les délais.
+
+Vous pouvez repasser commande à tout moment.`,
+      footer: "Tapez 'catalogue' pour voir nos produits disponibles"
+    }
+  });
+  const [templatesHaveChanges, setTemplatesHaveChanges] = useState(false);
+  const [previewTemplate, setPreviewTemplate] = useState<string | null>(null);
+
   // Fetch vendor config
   const { data: vendorConfig } = useQuery({
     queryKey: ["/api/vendor/config"],
@@ -153,6 +208,15 @@ export default function Settings() {
         autoReplyEnabled: vendorConfig.autoReplyEnabled ?? true,
         autoReminderEnabled: vendorConfig.autoReminderEnabled ?? true,
       });
+      // Load message templates if saved
+      if (vendorConfig.messageTemplates) {
+        try {
+          const savedTemplates = JSON.parse(vendorConfig.messageTemplates);
+          setMessageTemplates(prev => ({ ...prev, ...savedTemplates }));
+        } catch (e) {
+          console.error("Failed to parse message templates:", e);
+        }
+      }
     }
   }, [vendorConfig]);
 
@@ -244,6 +308,94 @@ export default function Settings() {
 
   const handleChatbotSave = () => {
     vendorConfigMutation.mutate(chatbotConfig);
+  };
+
+  const handleTemplatesSave = () => {
+    vendorConfigMutation.mutate({ messageTemplates: JSON.stringify(messageTemplates) });
+    setTemplatesHaveChanges(false);
+  };
+
+  const updateTemplate = (templateKey: string, field: 'header' | 'body' | 'footer', value: string) => {
+    setMessageTemplates(prev => ({
+      ...prev,
+      [templateKey]: { ...prev[templateKey as keyof typeof prev], [field]: value }
+    }));
+    setTemplatesHaveChanges(true);
+  };
+
+  const resetTemplateToDefault = (templateKey: string) => {
+    const defaults: Record<string, { header: string; body: string; footer: string }> = {
+      paymentLink: {
+        header: "🧾 Facture LivePay",
+        body: `Bonjour {{clientName}} !
+
+*Produit:* {{productName}}
+*Montant:* {{amount}} FCFA
+
+⏱️ Ce lien expire dans {{expiresIn}} minutes
+
+👇 Cliquez pour payer en toute sécurité:
+{{paymentUrl}}`,
+        footer: "Paiement sécurisé via Wave, Orange Money ou Carte bancaire"
+      },
+      paymentConfirmed: {
+        header: "✅ Paiement confirmé !",
+        body: `Merci {{clientName}} !
+
+Votre paiement de *{{amount}} FCFA* pour "{{productName}}" a été reçu.
+
+🧾 Référence: #{{reference}}
+
+Le vendeur a été notifié et préparera votre commande.`,
+        footer: "Merci d'avoir utilisé LivePay ! 🎉"
+      },
+      paymentReminder: {
+        header: "⏰ Rappel de paiement",
+        body: `Bonjour {{clientName}},
+
+Votre facture pour "{{productName}}" ({{amount}} FCFA) est toujours en attente.
+
+Il vous reste {{remainingMinutes}} minutes pour finaliser le paiement:
+{{paymentUrl}}`,
+        footer: "Après expiration, le produit sera remis en vente"
+      },
+      orderExpired: {
+        header: "⌛ Commande expirée",
+        body: `Bonjour {{clientName}},
+
+Votre réservation pour "{{productName}}" a expiré car le paiement n'a pas été effectué dans les délais.
+
+Vous pouvez repasser commande à tout moment.`,
+        footer: "Tapez 'catalogue' pour voir nos produits disponibles"
+      }
+    };
+    if (defaults[templateKey]) {
+      setMessageTemplates(prev => ({ ...prev, [templateKey]: defaults[templateKey] }));
+      setTemplatesHaveChanges(true);
+    }
+  };
+
+  const templateLabels: Record<string, { title: string; description: string; variables: string[] }> = {
+    paymentLink: { 
+      title: "Lien de paiement", 
+      description: "Envoyé quand un client demande à commander un produit",
+      variables: ["{{clientName}}", "{{productName}}", "{{amount}}", "{{expiresIn}}", "{{paymentUrl}}"]
+    },
+    paymentConfirmed: { 
+      title: "Paiement confirmé", 
+      description: "Envoyé après un paiement réussi",
+      variables: ["{{clientName}}", "{{productName}}", "{{amount}}", "{{reference}}"]
+    },
+    paymentReminder: { 
+      title: "Rappel de paiement", 
+      description: "Envoyé avant expiration du lien",
+      variables: ["{{clientName}}", "{{productName}}", "{{amount}}", "{{remainingMinutes}}", "{{paymentUrl}}"]
+    },
+    orderExpired: { 
+      title: "Commande expirée", 
+      description: "Envoyé quand le délai de paiement est dépassé",
+      variables: ["{{clientName}}", "{{productName}}"]
+    }
   };
 
   return (
@@ -515,6 +667,162 @@ export default function Settings() {
               }
             </Button>
           </div>
+        )}
+      </Card>
+
+      {/* Section Message Templates */}
+      <Card className="p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <FileText className="w-5 h-5 text-blue-500" />
+            <h2 className="font-semibold">Messages personnalisés</h2>
+          </div>
+          {templatesHaveChanges && (
+            <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">
+              Non enregistré
+            </Badge>
+          )}
+        </div>
+
+        <p className="text-sm text-muted-foreground">
+          Personnalisez les messages envoyés à vos clients. Utilisez les variables entre {"{{"}...{"}}"} pour insérer des données dynamiques.
+        </p>
+
+        <div className="space-y-3">
+          {Object.entries(messageTemplates).map(([key, template]) => {
+            const label = templateLabels[key];
+            const isExpanded = expandedTemplate === key;
+            const isPreview = previewTemplate === key;
+            
+            return (
+              <div key={key} className="border rounded-lg overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setExpandedTemplate(isExpanded ? null : key)}
+                  className="w-full flex items-center justify-between p-4 hover:bg-muted/50 transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="text-left">
+                      <p className="font-medium">{label.title}</p>
+                      <p className="text-xs text-muted-foreground">{label.description}</p>
+                    </div>
+                  </div>
+                  {isExpanded ? (
+                    <ChevronUp className="w-5 h-5 text-muted-foreground" />
+                  ) : (
+                    <ChevronDown className="w-5 h-5 text-muted-foreground" />
+                  )}
+                </button>
+
+                {isExpanded && (
+                  <div className="border-t p-4 space-y-4 bg-muted/30">
+                    {/* Variables disponibles */}
+                    <div className="flex flex-wrap gap-1.5">
+                      <span className="text-xs text-muted-foreground mr-1">Variables:</span>
+                      {label.variables.map((v) => (
+                        <Badge key={v} variant="secondary" className="text-xs font-mono">{v}</Badge>
+                      ))}
+                    </div>
+
+                    {/* Header */}
+                    <div className="space-y-2">
+                      <Label className="text-xs uppercase text-muted-foreground">En-tête (max 60 caractères)</Label>
+                      <Input
+                        value={template.header}
+                        onChange={(e) => updateTemplate(key, 'header', e.target.value.slice(0, 60))}
+                        placeholder="En-tête du message"
+                        maxLength={60}
+                      />
+                      <p className="text-xs text-muted-foreground text-right">{template.header.length}/60</p>
+                    </div>
+
+                    {/* Body */}
+                    <div className="space-y-2">
+                      <Label className="text-xs uppercase text-muted-foreground">Corps du message (max 1024 caractères)</Label>
+                      <Textarea
+                        value={template.body}
+                        onChange={(e) => updateTemplate(key, 'body', e.target.value.slice(0, 1024))}
+                        placeholder="Contenu principal du message"
+                        rows={6}
+                        className="font-mono text-sm"
+                        maxLength={1024}
+                      />
+                      <p className="text-xs text-muted-foreground text-right">{template.body.length}/1024</p>
+                    </div>
+
+                    {/* Footer */}
+                    <div className="space-y-2">
+                      <Label className="text-xs uppercase text-muted-foreground">Pied de page (max 60 caractères)</Label>
+                      <Input
+                        value={template.footer}
+                        onChange={(e) => updateTemplate(key, 'footer', e.target.value.slice(0, 60))}
+                        placeholder="Pied de page (texte grisé)"
+                        maxLength={60}
+                      />
+                      <p className="text-xs text-muted-foreground text-right">{template.footer.length}/60</p>
+                    </div>
+
+                    {/* Actions */}
+                    <div className="flex items-center gap-2 pt-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setPreviewTemplate(isPreview ? null : key)}
+                      >
+                        <Eye className="w-4 h-4 mr-1" />
+                        {isPreview ? "Masquer" : "Aperçu"}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => resetTemplateToDefault(key)}
+                      >
+                        <RotateCcw className="w-4 h-4 mr-1" />
+                        Réinitialiser
+                      </Button>
+                    </div>
+
+                    {/* Preview */}
+                    {isPreview && (
+                      <div className="mt-4 p-4 bg-green-50 dark:bg-green-950/30 rounded-lg border border-green-200 dark:border-green-800">
+                        <p className="text-xs text-green-600 dark:text-green-400 mb-2 font-medium">APERÇU WHATSAPP</p>
+                        <div className="bg-white dark:bg-gray-900 rounded-xl p-3 shadow-sm max-w-xs">
+                          {template.header && (
+                            <p className="font-bold text-sm mb-1">{template.header}</p>
+                          )}
+                          <p className="text-sm whitespace-pre-wrap">{template.body
+                            .replace("{{clientName}}", "Marie")
+                            .replace("{{productName}}", "Robe fleurie")
+                            .replace("{{amount}}", "15 000")
+                            .replace("{{expiresIn}}", "10")
+                            .replace("{{remainingMinutes}}", "5")
+                            .replace("{{paymentUrl}}", "livepay.tech/pay/abc123")
+                            .replace("{{reference}}", "LP-2024-001")
+                          }</p>
+                          {template.footer && (
+                            <p className="text-xs text-muted-foreground mt-2 italic">{template.footer}</p>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {templatesHaveChanges && (
+          <Button onClick={handleTemplatesSave} className="w-full" disabled={vendorConfigMutation.isPending}>
+            {vendorConfigMutation.isPending ? (
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <Save className="w-4 h-4 mr-2" />
+            )}
+            Enregistrer les messages
+          </Button>
         )}
       </Card>
 

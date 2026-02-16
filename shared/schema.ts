@@ -34,6 +34,8 @@ export const vendorConfigs = pgTable("vendor_configs", {
   autoReminderEnabled: boolean("auto_reminder_enabled").default(true),
   upsellEnabled: boolean("upsell_enabled").default(false),
   minTrustScoreRequired: integer("min_trust_score_required").default(0),
+  // Custom message templates (JSON)
+  messageTemplates: text("message_templates"), // JSON string for custom templates
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

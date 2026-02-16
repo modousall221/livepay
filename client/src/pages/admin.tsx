@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Table,
   TableBody,
@@ -30,6 +31,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { 
   Users, 
@@ -44,7 +46,16 @@ import {
   RefreshCw,
   Search,
   Shield,
-  Activity
+  Activity,
+  CheckCircle2,
+  XCircle,
+  Zap,
+  Phone,
+  Copy,
+  ExternalLink,
+  Terminal,
+  Radio,
+  AlertTriangle
 } from "lucide-react";
 
 // Types
@@ -135,6 +146,47 @@ async function fetchAllOrders(): Promise<Order[]> {
   return res.json();
 }
 
+async function testVendorWhatsApp(vendorId: string) {
+  const res = await fetch(`/api/admin/vendors/${vendorId}/test-whatsapp`, {
+    method: "POST",
+    credentials: "include",
+  });
+  return res.json();
+}
+
+async function setupVendorWhatsAppDefaults(vendorId: string) {
+  const res = await fetch(`/api/admin/vendors/${vendorId}/setup-whatsapp-defaults`, {
+    method: "POST",
+    credentials: "include",
+  });
+  return res.json();
+}
+
+// Component to show WhatsApp status inline
+function VendorWhatsAppStatus({ vendorId }: { vendorId: string }) {
+  const { data: config, isLoading } = useQuery({
+    queryKey: ["vendorConfig", vendorId],
+    queryFn: () => fetchVendorConfig(vendorId),
+    staleTime: 60000,
+  });
+
+  if (isLoading) {
+    return <Badge variant="outline" className="text-xs"><Loader2 className="w-3 h-3 animate-spin" /></Badge>;
+  }
+
+  const isConfigured = !!(config?.whatsappPhoneNumberId && config?.whatsappAccessToken);
+
+  return isConfigured ? (
+    <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
+      <CheckCircle2 className="w-3 h-3 mr-1" /> Configuré
+    </Badge>
+  ) : (
+    <Badge variant="outline" className="text-xs bg-amber-50 text-amber-700 border-amber-200">
+      <AlertTriangle className="w-3 h-3 mr-1" /> À configurer
+    </Badge>
+  );
+}
+
 // Components
 function StatCard({ title, value, icon: Icon, subtitle, trend }: {
   title: string;
@@ -168,6 +220,8 @@ function StatCard({ title, value, icon: Icon, subtitle, trend }: {
 function VendorConfigDialog({ vendor, onClose }: { vendor: Vendor; onClose: () => void }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const [showToken, setShowToken] = useState(false);
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string; phoneNumber?: string } | null>(null);
   const [config, setConfig] = useState<Partial<VendorConfig>>({
     whatsappPhoneNumberId: "",
     whatsappAccessToken: "",
@@ -204,13 +258,42 @@ function VendorConfigDialog({ vendor, onClose }: { vendor: Vendor; onClose: () =
     mutationFn: (data: Partial<VendorConfig>) => updateVendorConfig(vendor.id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["vendorConfig", vendor.id] });
+      queryClient.invalidateQueries({ queryKey: ["adminVendors"] });
       toast({ title: "Configuration sauvegardée" });
-      onClose();
     },
     onError: () => {
       toast({ title: "Erreur", description: "Impossible de sauvegarder", variant: "destructive" });
     },
   });
+
+  const testMutation = useMutation({
+    mutationFn: () => testVendorWhatsApp(vendor.id),
+    onSuccess: (data) => {
+      setTestResult(data);
+      if (data.success) {
+        toast({ title: "✅ Connexion réussie !", description: `Numéro: ${data.phoneNumber}` });
+      } else {
+        toast({ title: "❌ Échec", description: data.message, variant: "destructive" });
+      }
+    },
+    onError: () => {
+      toast({ title: "Erreur", description: "Test impossible", variant: "destructive" });
+    },
+  });
+
+  const setupDefaultsMutation = useMutation({
+    mutationFn: () => setupVendorWhatsAppDefaults(vendor.id),
+    onSuccess: (data) => {
+      if (data.success) {
+        toast({ title: "✅ Commandes configurées !" });
+      } else {
+        toast({ title: "Erreur", description: data.error, variant: "destructive" });
+      }
+    },
+  });
+
+  const isWhatsAppConfigured = !!(config.whatsappPhoneNumberId && config.whatsappAccessToken);
+  const webhookUrl = `${window.location.origin}/api/whatsapp/webhook`;
 
   return (
     <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -230,30 +313,72 @@ function VendorConfigDialog({ vendor, onClose }: { vendor: Vendor; onClose: () =
         </div>
       ) : (
         <div className="space-y-6 mt-4">
+          {/* Vendor Info */}
+          <div className="p-4 bg-muted/50 rounded-lg space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">Email</span>
+              <span className="font-mono text-sm">{vendor.email}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">Téléphone</span>
+              <span className="font-mono text-sm">{vendor.phone || "Non renseigné"}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">Mode Live</span>
+              <Badge variant={config.liveMode ? "default" : "secondary"} className={config.liveMode ? "bg-green-500" : ""}>
+                {config.liveMode ? <><Radio className="w-3 h-3 mr-1 animate-pulse" /> ACTIF</> : "INACTIF"}
+              </Badge>
+            </div>
+          </div>
+
+          <Separator />
+
           {/* WhatsApp API Config */}
           <div className="space-y-4">
-            <h3 className="font-semibold flex items-center gap-2">
-              <MessageCircle className="w-4 h-4 text-green-500" />
-              WhatsApp Business API
-            </h3>
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold flex items-center gap-2">
+                <MessageCircle className="w-4 h-4 text-green-500" />
+                WhatsApp Business API
+              </h3>
+              {isWhatsAppConfigured ? (
+                <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+                  <CheckCircle2 className="w-3 h-3 mr-1" /> Configuré
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">
+                  <AlertTriangle className="w-3 h-3 mr-1" /> Non configuré
+                </Badge>
+              )}
+            </div>
             
             <div className="space-y-3">
               <div className="space-y-2">
-                <Label>Phone Number ID</Label>
+                <Label className="flex items-center gap-2">
+                  <Phone className="w-3 h-3" />
+                  Phone Number ID
+                </Label>
                 <Input
                   value={config.whatsappPhoneNumberId || ""}
                   onChange={(e) => setConfig({ ...config, whatsappPhoneNumberId: e.target.value })}
-                  placeholder="1234567890123456"
+                  placeholder="994899897039054"
+                  className="font-mono"
                 />
               </div>
 
               <div className="space-y-2">
-                <Label>Access Token</Label>
+                <Label className="flex items-center justify-between">
+                  <span>Access Token</span>
+                  <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setShowToken(!showToken)}>
+                    <Eye className="w-3 h-3 mr-1" />
+                    {showToken ? "Masquer" : "Afficher"}
+                  </Button>
+                </Label>
                 <Input
-                  type="password"
+                  type={showToken ? "text" : "password"}
                   value={config.whatsappAccessToken || ""}
                   onChange={(e) => setConfig({ ...config, whatsappAccessToken: e.target.value })}
                   placeholder="EAAxxxxxxx..."
+                  className="font-mono text-xs"
                 />
               </div>
 
@@ -265,6 +390,80 @@ function VendorConfigDialog({ vendor, onClose }: { vendor: Vendor; onClose: () =
                   placeholder="livepay_webhook_verify"
                 />
               </div>
+
+              {/* Webhook URL */}
+              <div className="p-3 bg-muted/50 rounded-lg space-y-2">
+                <Label className="text-xs text-muted-foreground">URL Webhook (à configurer dans Meta)</Label>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 text-xs bg-background p-2 rounded border overflow-x-auto">
+                    {webhookUrl}
+                  </code>
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={() => {
+                      navigator.clipboard.writeText(webhookUrl);
+                      toast({ title: "Copié !" });
+                    }}
+                  >
+                    <Copy className="w-3 h-3" />
+                  </Button>
+                </div>
+              </div>
+
+              {/* Test & Actions */}
+              {isWhatsAppConfigured && (
+                <div className="flex gap-2">
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="flex-1"
+                    onClick={() => testMutation.mutate()}
+                    disabled={testMutation.isPending}
+                  >
+                    {testMutation.isPending ? (
+                      <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                    ) : testResult?.success ? (
+                      <CheckCircle2 className="w-3 h-3 mr-1 text-green-500" />
+                    ) : testResult ? (
+                      <XCircle className="w-3 h-3 mr-1 text-red-500" />
+                    ) : (
+                      <Zap className="w-3 h-3 mr-1" />
+                    )}
+                    Tester connexion
+                  </Button>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="flex-1"
+                    onClick={() => setupDefaultsMutation.mutate()}
+                    disabled={setupDefaultsMutation.isPending}
+                  >
+                    {setupDefaultsMutation.isPending ? (
+                      <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                    ) : (
+                      <Terminal className="w-3 h-3 mr-1" />
+                    )}
+                    Configurer commandes
+                  </Button>
+                </div>
+              )}
+
+              {testResult && (
+                <div className={`p-3 rounded-lg text-sm ${testResult.success ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
+                  {testResult.success ? (
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>Connecté : {testResult.phoneNumber}</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <XCircle className="w-4 h-4" />
+                      <span>{testResult.message}</span>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
@@ -542,9 +741,7 @@ export default function Admin() {
                     <TableCell className="text-sm">{vendor.email}</TableCell>
                     <TableCell className="text-sm">{vendor.phone || "-"}</TableCell>
                     <TableCell>
-                      <Badge variant="outline" className="text-xs">
-                        À configurer
-                      </Badge>
+                      <VendorWhatsAppStatus vendorId={vendor.id} />
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {formatDate(vendor.createdAt)}

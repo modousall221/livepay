@@ -1096,5 +1096,72 @@ export async function registerRoutes(
     }
   });
 
+  // ============================================================
+  // ADMIN WHATSAPP MANAGEMENT ROUTES
+  // ============================================================
+
+  // Test WhatsApp connection for a specific vendor (admin)
+  app.post("/api/admin/vendors/:vendorId/test-whatsapp", isAdmin, async (req: any, res) => {
+    try {
+      const { vendorId } = req.params;
+      const config = await storage.getVendorConfig(vendorId);
+      
+      if (!config?.whatsappPhoneNumberId || !config?.whatsappAccessToken) {
+        return res.json({ 
+          success: false, 
+          message: "Configuration WhatsApp incomplète" 
+        });
+      }
+
+      // Test connection with Meta API
+      const response = await fetch(
+        `https://graph.facebook.com/v18.0/${config.whatsappPhoneNumberId}`,
+        {
+          headers: { "Authorization": `Bearer ${config.whatsappAccessToken}` }
+        }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        res.json({ 
+          success: true, 
+          message: "Connexion réussie",
+          phoneNumber: data.display_phone_number,
+          verifiedName: data.verified_name
+        });
+      } else {
+        const error = await response.json();
+        res.json({ 
+          success: false, 
+          message: error.error?.message || "Erreur de connexion WhatsApp" 
+        });
+      }
+    } catch (error) {
+      console.error("WhatsApp test error:", error);
+      res.json({ success: false, message: "Erreur de test" });
+    }
+  });
+
+  // Setup WhatsApp defaults for a specific vendor (admin)
+  app.post("/api/admin/vendors/:vendorId/setup-whatsapp-defaults", isAdmin, async (req: any, res) => {
+    try {
+      const { vendorId } = req.params;
+      const config = await storage.getVendorConfig(vendorId);
+      
+      if (!config?.whatsappPhoneNumberId || !config?.whatsappAccessToken) {
+        return res.json({ 
+          success: false, 
+          error: "Configuration WhatsApp incomplète" 
+        });
+      }
+
+      const result = await whatsappService.setupDefaultCommands(config);
+      res.json(result);
+    } catch (error) {
+      console.error("Error setting up WhatsApp defaults:", error);
+      res.json({ success: false, error: "Erreur serveur" });
+    }
+  });
+
   return httpServer;
 }

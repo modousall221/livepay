@@ -26,6 +26,7 @@ import { randomBytes } from "crypto";
 export interface IStorage {
   getProductsByVendor(vendorId: string): Promise<Product[]>;
   getProduct(id: string): Promise<Product | undefined>;
+  getProductByShareCode(shareCode: string): Promise<Product | undefined>;
   createProduct(vendorId: string, data: InsertProduct): Promise<Product>;
   updateProduct(id: string, vendorId: string, data: Partial<InsertProduct>): Promise<Product | undefined>;
   deleteProduct(id: string, vendorId: string): Promise<void>;
@@ -45,6 +46,16 @@ export interface IStorage {
 }
 
 export class DatabaseStorage implements IStorage {
+  // Generate a unique short code for product sharing (6 chars alphanumeric)
+  private generateShareCode(): string {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Avoid confusing chars like 0/O, 1/I/L
+    let code = '';
+    for (let i = 0; i < 6; i++) {
+      code += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return code;
+  }
+
   async getProductsByVendor(vendorId: string): Promise<Product[]> {
     return db.select().from(products).where(eq(products.vendorId, vendorId)).orderBy(desc(products.createdAt));
   }
@@ -54,8 +65,23 @@ export class DatabaseStorage implements IStorage {
     return product;
   }
 
+  async getProductByShareCode(shareCode: string): Promise<Product | undefined> {
+    const [product] = await db.select().from(products).where(eq(products.shareCode, shareCode.toUpperCase()));
+    return product;
+  }
+
   async createProduct(vendorId: string, data: InsertProduct): Promise<Product> {
-    const [product] = await db.insert(products).values({ ...data, vendorId }).returning();
+    // Generate unique share code
+    let shareCode = this.generateShareCode();
+    let attempts = 0;
+    while (attempts < 10) {
+      const existing = await this.getProductByShareCode(shareCode);
+      if (!existing) break;
+      shareCode = this.generateShareCode();
+      attempts++;
+    }
+    
+    const [product] = await db.insert(products).values({ ...data, vendorId, shareCode }).returning();
     return product;
   }
 

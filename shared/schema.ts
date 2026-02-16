@@ -69,6 +69,7 @@ export const products = pgTable("products", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   vendorId: varchar("vendor_id").notNull().references(() => users.id),
   keyword: text("keyword").notNull(), // Mot-clé pour chatbot (ROBE1, CHAUSSURE2, etc.)
+  shareCode: varchar("share_code", { length: 8 }).unique(), // Code court pour partage (ex: A1B2C3)
   name: text("name").notNull(),
   price: integer("price").notNull(),
   description: text("description"),

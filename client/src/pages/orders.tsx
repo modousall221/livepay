@@ -3,7 +3,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Package, Phone, Clock, CheckCircle, XCircle, AlertCircle } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Package, Phone, Clock, CheckCircle, XCircle, AlertCircle, MessageCircle } from "lucide-react";
+import { InitiateChatDialog } from "@/components/initiate-chat-dialog";
 
 interface Order {
   id: string;
@@ -72,9 +74,19 @@ export default function Orders() {
 
   return (
     <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Commandes</h1>
-        <p className="text-muted-foreground">Suivi des commandes WhatsApp</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Commandes</h1>
+          <p className="text-muted-foreground">Suivi des commandes WhatsApp</p>
+        </div>
+        <InitiateChatDialog
+          trigger={
+            <Button className="gap-2 bg-green-600 hover:bg-green-700">
+              <MessageCircle className="w-4 h-4" />
+              Contacter un client
+            </Button>
+          }
+        />
       </div>
 
       {/* Stats Cards */}
@@ -165,19 +177,29 @@ export default function Orders() {
                           </div>
                         </div>
                       </div>
-                      <div className="text-right">
-                        <p className="font-semibold">{formatPrice(order.totalAmount)}</p>
-                        <div className="flex items-center gap-2 justify-end mt-1">
-                          <Badge
-                            variant={order.status === "paid" ? "default" : "secondary"}
-                            className={order.status === "paid" ? "bg-green-600" : ""}
-                          >
-                            {config.label}
-                          </Badge>
+                      <div className="text-right flex items-center gap-3">
+                        <InitiateChatDialog
+                          defaultPhone={order.clientPhone}
+                          trigger={
+                            <Button size="sm" variant="ghost" className="text-green-600 hover:text-green-700 hover:bg-green-50">
+                              <MessageCircle className="w-4 h-4" />
+                            </Button>
+                          }
+                        />
+                        <div>
+                          <p className="font-semibold">{formatPrice(order.totalAmount)}</p>
+                          <div className="flex items-center gap-2 justify-end mt-1">
+                            <Badge
+                              variant={order.status === "paid" ? "default" : "secondary"}
+                              className={order.status === "paid" ? "bg-green-600" : ""}
+                            >
+                              {config.label}
+                            </Badge>
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            {formatDate(order.createdAt)}
+                          </p>
                         </div>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          {formatDate(order.createdAt)}
-                        </p>
                       </div>
                     </div>
                   );

@@ -19,6 +19,7 @@ import Orders from "@/pages/orders";
 import Settings from "@/pages/settings";
 import Admin from "@/pages/admin";
 import Pay from "@/pages/pay";
+import ProductPublic from "@/pages/product-public";
 import { InstallPrompt } from "@/components/install-prompt";
 
 function AuthenticatedRouter() {
@@ -70,6 +71,7 @@ function AppRouter() {
     <>
       <Switch>
         <Route path="/pay/:token" component={Pay} />
+        <Route path="/p/:code" component={ProductPublic} />
         <Route path="/login">
           {user ? <AuthenticatedRouter /> : <Login />}
         </Route>

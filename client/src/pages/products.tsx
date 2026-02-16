@@ -18,10 +18,11 @@ import {
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { insertProductSchema, type Product, type InsertProduct } from "@shared/schema";
-import { Plus, Package, Trash2, Pencil } from "lucide-react";
+import { Plus, Package, Trash2, Pencil, Share2, QrCode } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { isUnauthorizedError } from "@/lib/auth-utils";
 import { useState, useEffect } from "react";
+import { ProductShareDialog } from "@/components/product-share-dialog";
 
 export default function Products() {
   const { toast } = useToast();
@@ -316,6 +317,11 @@ export default function Products() {
                     <Badge variant="outline" className="font-mono text-xs">
                       {product.keyword}
                     </Badge>
+                    {product.shareCode && (
+                      <Badge variant="secondary" className="font-mono text-xs">
+                        #{product.shareCode}
+                      </Badge>
+                    )}
                     {!product.active && <Badge variant="secondary">Inactif</Badge>}
                   </div>
                   <h3 className="font-semibold truncate" data-testid={`text-product-name-${product.id}`}>
@@ -326,6 +332,15 @@ export default function Products() {
                   </p>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
+                  <ProductShareDialog
+                    productId={product.id}
+                    productName={product.name}
+                    trigger={
+                      <Button size="icon" variant="ghost" className="text-green-600 hover:text-green-700 hover:bg-green-50">
+                        <QrCode className="w-4 h-4" />
+                      </Button>
+                    }
+                  />
                   <Switch
                     checked={product.active}
                     onCheckedChange={(checked) =>

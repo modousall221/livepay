@@ -7,6 +7,24 @@ import { getPaymentProvider, getAvailableProviders } from "./payment-providers";
 import { whatsappService } from "./whatsapp/service";
 import type { WhatsAppWebhookPayload } from "./whatsapp/types";
 
+// Helper to get display phone number from WhatsApp Business API
+async function getWhatsAppDisplayPhone(phoneNumberId: string, accessToken?: string | null): Promise<string | null> {
+  if (!phoneNumberId || !accessToken) return null;
+  try {
+    const response = await fetch(
+      `https://graph.facebook.com/v18.0/${phoneNumberId}?fields=display_phone_number`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+    if (response.ok) {
+      const data = await response.json();
+      return data.display_phone_number?.replace(/[^0-9]/g, '') || null;
+    }
+  } catch (e) {
+    console.error("Error fetching WhatsApp phone:", e);
+  }
+  return null;
+}
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
@@ -17,6 +35,118 @@ export async function registerRoutes(
   // Health check endpoint for Railway/deployment monitoring
   app.get("/api/health", (_req, res) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
+  });
+
+  // ========== PUBLIC PRODUCT SHARING ROUTES ==========
+  
+  // Get product by share code (public - for sharing links)
+  app.get("/api/public/product/:code", async (req, res) => {
+    try {
+      const product = await storage.getProductByShareCode(req.params.code);
+      if (!product || !product.active) {
+        return res.status(404).json({ message: "Produit non trouvé" });
+      }
+      
+      // Get vendor info for WhatsApp link
+      const vendorConfig = await storage.getVendorConfig(product.vendorId);
+      const phoneNumber = vendorConfig?.whatsappPhoneNumberId ? 
+        await getWhatsAppDisplayPhone(vendorConfig.whatsappPhoneNumberId, vendorConfig.whatsappAccessToken) : 
+        null;
+      
+      res.json({
+        id: product.id,
+        name: product.name,
+        keyword: product.keyword,
+        shareCode: product.shareCode,
+        price: product.price,
+        description: product.description,
+        imageUrl: product.imageUrl,
+        stock: product.stock - (product.reservedStock || 0),
+        vendorName: vendorConfig?.businessName || "Boutique",
+        whatsappNumber: phoneNumber,
+      });
+    } catch (error) {
+      console.error("Error fetching public product:", error);
+      res.status(500).json({ message: "Erreur serveur" });
+    }
+  });
+
+  // Vendor initiate chat with a client
+  app.post("/api/vendor/initiate-chat", isAuthenticated, async (req: any, res) => {
+    try {
+      const vendorId = (req.user as any).id;
+      const { clientPhone, productId, message } = req.body;
+      
+      if (!clientPhone) {
+        return res.status(400).json({ message: "Numéro de téléphone requis" });
+      }
+      
+      const vendorConfig = await storage.getVendorConfig(vendorId);
+      if (!vendorConfig?.whatsappPhoneNumberId || !vendorConfig?.whatsappAccessToken) {
+        return res.status(400).json({ message: "WhatsApp non configuré" });
+      }
+      
+      let chatMessage = message;
+      
+      // If productId provided, include product info
+      if (productId) {
+        const product = await storage.getProduct(productId);
+        if (product && product.vendorId === vendorId) {
+          const appHost = process.env.APP_HOST || 
+            (process.env.NODE_ENV === "production" ? "https://livepay.tech" : "http://localhost:5000");
+          const productLink = `${appHost}/p/${product.shareCode}`;
+          
+          chatMessage = message || 
+            `🛍️ *${product.name}*\n💰 ${product.price.toLocaleString("fr-FR")} FCFA\n\n` +
+            `📱 Pour commander, envoyez le code: *${product.keyword}*\n\n` +
+            `🔗 ${productLink}`;
+        }
+      }
+      
+      // Send WhatsApp message
+      const result = await whatsappService.sendMessage(
+        clientPhone,
+        chatMessage || "Bonjour ! Comment puis-je vous aider ?",
+        vendorConfig.whatsappPhoneNumberId,
+        vendorConfig.whatsappAccessToken
+      );
+      
+      res.json({ success: true, messageId: result?.messages?.[0]?.id });
+    } catch (error: any) {
+      console.error("Error initiating chat:", error);
+      res.status(500).json({ message: error.message || "Erreur d'envoi" });
+    }
+  });
+
+  // Get product share info (for quick share dialog)
+  app.get("/api/products/:id/share", isAuthenticated, async (req: any, res) => {
+    try {
+      const vendorId = (req.user as any).id;
+      const product = await storage.getProduct(req.params.id);
+      
+      if (!product || product.vendorId !== vendorId) {
+        return res.status(404).json({ message: "Produit non trouvé" });
+      }
+      
+      const appHost = process.env.APP_HOST || 
+        (process.env.NODE_ENV === "production" ? "https://livepay.tech" : "http://localhost:5000");
+      
+      const vendorConfig = await storage.getVendorConfig(vendorId);
+      const phoneNumber = vendorConfig?.whatsappPhoneNumberId || "";
+      
+      res.json({
+        shareCode: product.shareCode,
+        keyword: product.keyword,
+        name: product.name,
+        price: product.price,
+        shareUrl: `${appHost}/p/${product.shareCode}`,
+        whatsappDeepLink: `https://wa.me/${phoneNumber}?text=${encodeURIComponent(product.keyword)}`,
+        qrData: `${appHost}/p/${product.shareCode}`,
+      });
+    } catch (error) {
+      console.error("Error getting share info:", error);
+      res.status(500).json({ message: "Erreur serveur" });
+    }
   });
 
   app.get("/api/products", isAuthenticated, async (req: any, res) => {

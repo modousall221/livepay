@@ -138,8 +138,13 @@ export async function updateUserProfile(uid: string, data: Partial<UserProfile>)
 export function subscribeToAuth(callback: (user: UserProfile | null) => void): () => void {
   return onAuthStateChanged(auth, async (firebaseUser) => {
     if (firebaseUser) {
-      const profile = await getUserProfile(firebaseUser.uid);
-      callback(profile);
+      try {
+        const profile = await getUserProfile(firebaseUser.uid);
+        callback(profile);
+      } catch (error) {
+        console.error("Error getting user profile:", error);
+        callback(null);
+      }
     } else {
       callback(null);
     }

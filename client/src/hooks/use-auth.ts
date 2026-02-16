@@ -20,12 +20,22 @@ export function useAuth() {
 
   // Subscribe to Firebase auth state
   useEffect(() => {
+    // Set a timeout to resolve loading state if Firebase takes too long
+    const timeout = setTimeout(() => {
+      setIsLoading(false);
+    }, 5000);
+
     const unsubscribe = subscribeToAuth((profile) => {
+      clearTimeout(timeout);
       setUser(profile);
       setIsLoading(false);
       queryClient.setQueryData(["/api/auth/user"], profile);
     });
-    return () => unsubscribe();
+    
+    return () => {
+      clearTimeout(timeout);
+      unsubscribe();
+    };
   }, [queryClient]);
 
   const loginMutation = useMutation({

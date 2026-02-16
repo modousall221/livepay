@@ -83,9 +83,10 @@ app.use((req, res, next) => {
     const { setupVite } = await import("./vite");
     await setupVite(httpServer, app);
   }
+  const PORT = process.env.PORT || 9002;
 
-  const port = parseInt(process.env.PORT || "5000", 10);
-  httpServer.listen(port, () => {
-    log(`serving on port ${port}`);
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`[express] serving on port ${PORT}`);
   });
+
 })();

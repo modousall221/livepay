@@ -17,6 +17,7 @@ import {
   MessageCircle,
   Link2,
   ImageIcon,
+  Loader2,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { type Product } from "@/lib/firebase";
@@ -32,6 +33,7 @@ export function ProductShareDialog({
 }: ProductShareDialogProps) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
+  const [sharing, setSharing] = useState(false);
   const { toast } = useToast();
 
   // Compute share info locally from product data
@@ -60,19 +62,53 @@ export function ProductShareDialog({
   };
 
   const handleShare = async () => {
-    if (navigator.share && shareInfo) {
-      try {
-        await navigator.share({
-          title: shareInfo.name,
-          text: `${shareInfo.name} - ${shareInfo.price.toLocaleString("fr-FR")} FCFA\nCode: ${shareInfo.keyword}`,
-          url: shareInfo.shareUrl,
-        });
-      } catch (err) {
-        // User cancelled
-      }
-    } else {
-      // Fallback: copy link
+    if (!navigator.share) {
       copyToClipboard(shareInfo.shareUrl, "Lien");
+      return;
+    }
+
+    setSharing(true);
+    
+    const shareText = `🛍️ ${shareInfo.name}\n\n💰 ${shareInfo.price.toLocaleString("fr-FR")} FCFA\n\n📦 Code: ${shareInfo.keyword}\n\n👉 Commander:`;
+
+    try {
+      // Try to share with image if available
+      if (product.imageUrl && navigator.canShare) {
+        try {
+          const response = await fetch(product.imageUrl);
+          const blob = await response.blob();
+          const file = new File([blob], `${product.name}.jpg`, { type: blob.type || 'image/jpeg' });
+          
+          const shareData = {
+            files: [file],
+            title: shareInfo.name,
+            text: shareText,
+            url: shareInfo.shareUrl,
+          };
+
+          if (navigator.canShare(shareData)) {
+            await navigator.share(shareData);
+            setSharing(false);
+            return;
+          }
+        } catch (imgError) {
+          console.log("Could not share image, falling back to text only");
+        }
+      }
+
+      // Fallback: share without image
+      await navigator.share({
+        title: shareInfo.name,
+        text: shareText,
+        url: shareInfo.shareUrl,
+      });
+    } catch (err) {
+      // User cancelled or error
+      if ((err as Error).name !== 'AbortError') {
+        copyToClipboard(shareInfo.shareUrl, "Lien");
+      }
+    } finally {
+      setSharing(false);
     }
   };
 
@@ -189,9 +225,14 @@ export function ProductShareDialog({
             <Button
               className="flex-1 bg-green-600 hover:bg-green-700"
               onClick={handleShare}
+              disabled={sharing}
             >
-              <Share2 className="w-4 h-4 mr-2" />
-              Partager
+              {sharing ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <Share2 className="w-4 h-4 mr-2" />
+              )}
+              {sharing ? "Partage..." : "Partager"}
             </Button>
           </div>
 

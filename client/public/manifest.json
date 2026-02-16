@@ -1,7 +1,7 @@
 {
-  "name": "LivePay - Paiement Live Commerce",
+  "name": "LivePay - Chatbot WhatsApp Live Commerce",
   "short_name": "LivePay",
-  "description": "Infrastructure de paiement instantane pour le live commerce en zone UEMOA",
+  "description": "Automatisez vos ventes en live avec le chatbot WhatsApp LivePay",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0a0a0a",

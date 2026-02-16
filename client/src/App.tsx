@@ -17,6 +17,7 @@ import Dashboard from "@/pages/dashboard";
 import Products from "@/pages/products";
 import Orders from "@/pages/orders";
 import Settings from "@/pages/settings";
+import Admin from "@/pages/admin";
 import Pay from "@/pages/pay";
 import { InstallPrompt } from "@/components/install-prompt";
 
@@ -41,6 +42,7 @@ function AuthenticatedRouter() {
               <Route path="/products" component={Products} />
               <Route path="/orders" component={Orders} />
               <Route path="/settings" component={Settings} />
+              <Route path="/admin" component={Admin} />
               <Route component={NotFound} />
             </Switch>
           </main>

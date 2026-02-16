@@ -5,6 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
 import {
   Select,
   SelectContent,
@@ -23,7 +24,11 @@ import {
   Loader2,
   LogOut,
   Phone,
-  Store
+  Store,
+  Zap,
+  CheckCircle,
+  AlertCircle,
+  Terminal
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
@@ -99,6 +104,25 @@ async function updateProfile(data: {
   return response.json();
 }
 
+async function setupWhatsAppDefaults() {
+  const response = await fetch("/api/vendor/whatsapp-automation/setup-defaults", {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!response.ok) {
+    throw new Error("Erreur configuration WhatsApp");
+  }
+  return response.json();
+}
+
+async function getWhatsAppAutomation() {
+  const response = await fetch("/api/vendor/whatsapp-automation", {
+    credentials: "include",
+  });
+  if (!response.ok) return null;
+  return response.json();
+}
+
 export default function Settings() {
   const { user, logout, isLoggingOut } = useAuth();
   const { toast } = useToast();
@@ -170,6 +194,24 @@ export default function Settings() {
     },
     onError: () => {
       toast({ title: "Erreur", description: "Impossible de mettre à jour le profil", variant: "destructive" });
+    },
+  });
+
+  // WhatsApp automation
+  const { data: whatsappAutomation, refetch: refetchAutomation } = useQuery({
+    queryKey: ["/api/vendor/whatsapp-automation"],
+    queryFn: getWhatsAppAutomation,
+    enabled: !!vendorConfig?.whatsappPhoneNumberId,
+  });
+
+  const setupDefaultsMutation = useMutation({
+    mutationFn: setupWhatsAppDefaults,
+    onSuccess: () => {
+      refetchAutomation();
+      toast({ title: "Commandes WhatsApp configurées !" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Erreur", description: error.message, variant: "destructive" });
     },
   });
 
@@ -382,6 +424,98 @@ export default function Settings() {
           )}
           Enregistrer
         </Button>
+      </Card>
+
+      {/* Section WhatsApp Conversational Automation */}
+      <Card className="p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Terminal className="w-5 h-5 text-green-500" />
+            <h2 className="font-semibold">Commandes WhatsApp</h2>
+          </div>
+          {whatsappAutomation?.success && whatsappAutomation?.data?.commands?.length > 0 && (
+            <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+              <CheckCircle className="w-3 h-3 mr-1" />
+              Configuré
+            </Badge>
+          )}
+        </div>
+
+        <p className="text-sm text-muted-foreground">
+          Configurez les commandes automatiques que vos clients peuvent utiliser sur WhatsApp (ex: /aide, /commandes)
+        </p>
+
+        {!vendorConfig?.whatsappPhoneNumberId ? (
+          <div className="p-4 bg-amber-50 dark:bg-amber-950/20 rounded-lg border border-amber-200 dark:border-amber-800">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="font-medium text-amber-700 dark:text-amber-400">Configuration API requise</p>
+                <p className="text-sm text-amber-600 dark:text-amber-500 mt-1">
+                  Contactez l'administrateur pour configurer votre Phone Number ID WhatsApp.
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {whatsappAutomation?.success && whatsappAutomation?.data && (
+              <div className="space-y-3">
+                {/* Welcome message status */}
+                <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+                  <span className="text-sm">Message de bienvenue</span>
+                  <Badge variant={whatsappAutomation.data.enable_welcome_message ? "default" : "secondary"}>
+                    {whatsappAutomation.data.enable_welcome_message ? "Activé" : "Désactivé"}
+                  </Badge>
+                </div>
+
+                {/* Commands list */}
+                {whatsappAutomation.data.commands?.length > 0 && (
+                  <div className="space-y-2">
+                    <Label className="text-xs text-muted-foreground uppercase">Commandes actives</Label>
+                    <div className="grid gap-2">
+                      {whatsappAutomation.data.commands.map((cmd: any, i: number) => (
+                        <div key={i} className="flex items-center gap-3 p-2 bg-muted/30 rounded-lg">
+                          <Badge variant="outline" className="font-mono">/{cmd.command_name}</Badge>
+                          <span className="text-sm text-muted-foreground">{cmd.command_description}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Prompts list */}
+                {whatsappAutomation.data.prompts?.length > 0 && (
+                  <div className="space-y-2">
+                    <Label className="text-xs text-muted-foreground uppercase">Suggestions rapides</Label>
+                    <div className="flex flex-wrap gap-2">
+                      {whatsappAutomation.data.prompts.map((prompt: string, i: number) => (
+                        <Badge key={i} variant="secondary">{prompt}</Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <Button 
+              onClick={() => setupDefaultsMutation.mutate()} 
+              variant="outline"
+              className="w-full"
+              disabled={setupDefaultsMutation.isPending}
+            >
+              {setupDefaultsMutation.isPending ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <Zap className="w-4 h-4 mr-2" />
+              )}
+              {whatsappAutomation?.data?.commands?.length > 0 
+                ? "Réinitialiser les commandes par défaut" 
+                : "Configurer les commandes LivePay"
+              }
+            </Button>
+          </div>
+        )}
       </Card>
 
       {/* Section Notifications */}

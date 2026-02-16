@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -17,6 +18,9 @@ import {
 } from "lucide-react";
 import { Link } from "wouter";
 import { useToast } from "@/hooks/use-toast";
+import { OnboardingChecklist, WelcomeModal } from "@/components/onboarding";
+import { QuickActions } from "@/components/quick-actions";
+import { StatsSkeleton } from "@/components/empty-state";
 
 interface VendorConfig {
   id: string;
@@ -74,6 +78,23 @@ async function apiRequest(method: string, url: string, data?: any) {
 export default function Dashboard() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  
+  // Welcome modal state for new users
+  const [showWelcome, setShowWelcome] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(true);
+  
+  // Check if first visit
+  useEffect(() => {
+    const hasVisited = localStorage.getItem("livepay_visited");
+    if (!hasVisited) {
+      setShowWelcome(true);
+    }
+  }, []);
+  
+  const dismissWelcome = () => {
+    localStorage.setItem("livepay_visited", "true");
+    setShowWelcome(false);
+  };
 
   const { data: config, isLoading: loadingConfig } = useQuery<VendorConfig>({
     queryKey: ["/api/vendor/config"],
@@ -114,26 +135,47 @@ export default function Dashboard() {
   };
 
   const recentOrders = orders?.slice(0, 5) || [];
+  
+  // Onboarding state calculations
+  const hasProducts = (products?.length || 0) > 0;
+  const hasPhone = true; // TODO: Check from config when available
+  const hasLiveMode = config?.liveMode || false;
 
   if (isLoading) {
     return (
       <div className="p-6 space-y-6">
         <Skeleton className="h-8 w-48" />
         <Skeleton className="h-32" />
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-24" />)}
-        </div>
+        <StatsSkeleton />
       </div>
     );
   }
 
   return (
     <div className="p-6 space-y-6 max-w-5xl">
+      {/* Welcome Modal for first-time users */}
+      {showWelcome && <WelcomeModal onClose={dismissWelcome} />}
+      
+      {/* Quick Actions FAB */}
+      <QuickActions 
+        isLiveMode={config?.liveMode || false}
+        onToggleLiveMode={() => toggleLiveMode.mutate(!config?.liveMode)}
+      />
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold" data-testid="text-dashboard-title">Dashboard</h1>
         <p className="text-muted-foreground">LivePay - Chatbot WhatsApp pour vos lives</p>
       </div>
+
+      {/* Onboarding Checklist - shows until all steps complete or dismissed */}
+      {showOnboarding && (
+        <OnboardingChecklist
+          hasProducts={hasProducts}
+          hasPhone={hasPhone}
+          hasLiveMode={hasLiveMode}
+          onDismiss={() => setShowOnboarding(false)}
+        />
+      )}
 
       {/* Live Mode Control - BIG TOGGLE */}
       <Card className={`border-2 ${config?.liveMode ? "border-green-500 bg-green-50 dark:bg-green-950/20" : "border-gray-300"}`}>

@@ -195,7 +195,7 @@ export default function Landing() {
 
       <footer className="border-t py-6">
         <div className="max-w-6xl mx-auto px-4 text-center text-sm text-muted-foreground">
-          <span>LivePay &copy; 2025</span>
+          <span>LivePay &copy; 2025 — livepay.tech</span>
         </div>
       </footer>
     </div>

@@ -1,7 +1,9 @@
 # LivePay MVP - Architecture Simplifiée
 
 ## Vision
-Chatbot WhatsApp transactionnel pour le live commerce en Afrique francophone (zone UEMOA).
+Chatbot WhatsApp transactionnel pour le live commerce en Afrique francophone.
+
+**Domaine:** https://livepay.tech
 
 ---
 

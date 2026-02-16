@@ -27,12 +27,15 @@ function getBictorysHeaders() {
 }
 
 function getAppHost() {
-  if (process.env.REPLIT_DEV_DOMAIN) {
-    return `https://${process.env.REPLIT_DEV_DOMAIN}`;
+  // Custom domain from environment
+  if (process.env.APP_DOMAIN) {
+    return `https://${process.env.APP_DOMAIN}`;
   }
-  if (process.env.REPL_SLUG && process.env.REPL_OWNER) {
-    return `https://${process.env.REPL_SLUG}.${process.env.REPL_OWNER}.repl.co`;
+  // Production domain
+  if (process.env.NODE_ENV === "production") {
+    return "https://livepay.tech";
   }
+  // Development
   return "http://localhost:5000";
 }
 
@@ -62,7 +65,7 @@ async function createBictorysCheckout(
       customer: {
         name: clientName,
         phone: clientPhone,
-        email: clientEmail || `${clientPhone.replace(/[^0-9]/g, "")}@livepay.sn`,
+        email: clientEmail || `${clientPhone.replace(/[^0-9]/g, "")}@livepay.tech`,
       },
     };
 

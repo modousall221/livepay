@@ -18,8 +18,9 @@ import {
   type Client,
   type InsertClient,
 } from "@shared/schema";
+import { users } from "@shared/models/auth";
 import { db } from "./db";
-import { eq, and, desc, sql, ilike } from "drizzle-orm";
+import { eq, and, desc, sql, ilike, gte, count } from "drizzle-orm";
 import { randomBytes } from "crypto";
 
 export interface IStorage {
@@ -553,6 +554,108 @@ export class DatabaseStorage implements IStorage {
         clientTrustScore: trustScore 
       })
       .where(eq(orders.id, orderId));
+  }
+
+  // ========== ADMIN BACKOFFICE METHODS ==========
+
+  async getAllVendors(): Promise<any[]> {
+    return db
+      .select({
+        id: users.id,
+        email: users.email,
+        firstName: users.firstName,
+        lastName: users.lastName,
+        businessName: users.businessName,
+        phone: users.phone,
+        role: users.role,
+        createdAt: users.createdAt,
+      })
+      .from(users)
+      .orderBy(desc(users.createdAt));
+  }
+
+  async getVendorById(vendorId: string): Promise<any | undefined> {
+    const [vendor] = await db
+      .select({
+        id: users.id,
+        email: users.email,
+        firstName: users.firstName,
+        lastName: users.lastName,
+        businessName: users.businessName,
+        phone: users.phone,
+        role: users.role,
+        createdAt: users.createdAt,
+      })
+      .from(users)
+      .where(eq(users.id, vendorId));
+    return vendor;
+  }
+
+  async getAdminStats(): Promise<{
+    totalVendors: number;
+    activeVendors: number;
+    totalOrders: number;
+    paidOrders: number;
+    totalRevenue: number;
+    todayOrders: number;
+    todayRevenue: number;
+  }> {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // Total vendors
+    const [vendorCount] = await db
+      .select({ count: count() })
+      .from(users)
+      .where(eq(users.role, "vendor"));
+
+    // Active vendors (have at least one config)
+    const [activeCount] = await db
+      .select({ count: count() })
+      .from(vendorConfigs);
+
+    // Order stats
+    const allOrders = await db.select().from(orders);
+    const paidOrders = allOrders.filter(o => o.status === "paid");
+    const todayOrders = allOrders.filter(o => o.createdAt && new Date(o.createdAt) >= today);
+    const todayPaidOrders = paidOrders.filter(o => o.paidAt && new Date(o.paidAt) >= today);
+
+    const totalRevenue = paidOrders.reduce((sum, o) => sum + Number(o.totalAmount || 0), 0);
+    const todayRevenue = todayPaidOrders.reduce((sum, o) => sum + Number(o.totalAmount || 0), 0);
+
+    return {
+      totalVendors: vendorCount?.count || 0,
+      activeVendors: activeCount?.count || 0,
+      totalOrders: allOrders.length,
+      paidOrders: paidOrders.length,
+      totalRevenue,
+      todayOrders: todayOrders.length,
+      todayRevenue,
+    };
+  }
+
+  async getAllOrders(): Promise<any[]> {
+    const allOrders = await db
+      .select()
+      .from(orders)
+      .orderBy(desc(orders.createdAt))
+      .limit(500);
+
+    // Get vendor info for each order
+    const vendorIds = Array.from(new Set(allOrders.map(o => o.vendorId)));
+    const vendorMap = new Map<string, any>();
+    
+    for (const vendorId of vendorIds) {
+      const config = await this.getVendorConfig(vendorId);
+      if (config) {
+        vendorMap.set(vendorId, { businessName: config.businessName });
+      }
+    }
+
+    return allOrders.map(order => ({
+      ...order,
+      vendor: vendorMap.get(order.vendorId) || null,
+    }));
   }
 }
 

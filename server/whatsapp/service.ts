@@ -449,7 +449,7 @@ Confirmer ?`,
       state.currentStep = "awaiting_payment";
 
       const appHost = process.env.APP_HOST || 
-        (process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : "http://localhost:5000");
+        (process.env.NODE_ENV === "production" ? "https://livepay.tech" : "http://localhost:5000");
       const payUrl = `${appHost}/pay/${order.paymentToken}`;
 
       await storage.updateOrderPaymentInfo(order.id, payUrl, "wave");
@@ -728,6 +728,130 @@ Merci ${data.clientName} !
 
 Merci ! 🎉`
     );
+  }
+
+  /**
+   * Configure les Conversational Components de WhatsApp
+   * (welcome message, commands, prompts)
+   */
+  async configureConversationalAutomation(
+    vendorConfig: VendorConfig,
+    options: {
+      enableWelcomeMessage?: boolean;
+      commands?: Array<{ command_name: string; command_description: string }>;
+      prompts?: string[];
+    }
+  ): Promise<{ success: boolean; error?: string }> {
+    const phoneNumberId = vendorConfig.whatsappPhoneNumberId;
+    const accessToken = vendorConfig.whatsappAccessToken;
+
+    if (!phoneNumberId || !accessToken) {
+      return { success: false, error: "WhatsApp API non configurée" };
+    }
+
+    try {
+      const payload: any = {};
+      
+      if (options.enableWelcomeMessage !== undefined) {
+        payload.enable_welcome_message = options.enableWelcomeMessage;
+      }
+      
+      if (options.commands && options.commands.length > 0) {
+        payload.commands = options.commands;
+      }
+      
+      if (options.prompts && options.prompts.length > 0) {
+        payload.prompts = options.prompts;
+      }
+
+      const response = await fetch(
+        `${WHATSAPP_API_URL}/${phoneNumberId}/conversational_automation`,
+        {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        console.error("[WhatsApp] Erreur config automation:", data);
+        return { success: false, error: data.error?.message || "Erreur inconnue" };
+      }
+
+      console.log("[WhatsApp] Conversational automation configurée:", data);
+      return { success: true };
+    } catch (error) {
+      console.error("[WhatsApp] Erreur config automation:", error);
+      return { success: false, error: String(error) };
+    }
+  }
+
+  /**
+   * Récupère la configuration actuelle des Conversational Components
+   */
+  async getConversationalAutomation(
+    vendorConfig: VendorConfig
+  ): Promise<{ success: boolean; data?: any; error?: string }> {
+    const phoneNumberId = vendorConfig.whatsappPhoneNumberId;
+    const accessToken = vendorConfig.whatsappAccessToken;
+
+    if (!phoneNumberId || !accessToken) {
+      return { success: false, error: "WhatsApp API non configurée" };
+    }
+
+    try {
+      const response = await fetch(
+        `${WHATSAPP_API_URL}/${phoneNumberId}?fields=conversational_automation`,
+        {
+          method: "GET",
+          headers: {
+            "Authorization": `Bearer ${accessToken}`,
+          },
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        console.error("[WhatsApp] Erreur get automation:", data);
+        return { success: false, error: data.error?.message || "Erreur inconnue" };
+      }
+
+      return { success: true, data: data.conversational_automation };
+    } catch (error) {
+      console.error("[WhatsApp] Erreur get automation:", error);
+      return { success: false, error: String(error) };
+    }
+  }
+
+  /**
+   * Configure les commandes par défaut pour LivePay
+   */
+  async setupDefaultCommands(vendorConfig: VendorConfig): Promise<{ success: boolean; error?: string }> {
+    // Commandes par défaut pour un vendeur live commerce
+    const defaultCommands = [
+      { command_name: "aide", command_description: "Afficher l'aide et les commandes disponibles" },
+      { command_name: "commandes", command_description: "Voir vos commandes en cours" },
+      { command_name: "catalogue", command_description: "Afficher les produits disponibles" },
+      { command_name: "annuler", command_description: "Annuler votre dernière commande" },
+    ];
+
+    const defaultPrompts = [
+      "🛍️ Commander un produit",
+      "📋 Mes commandes",
+      "❓ Aide",
+    ];
+
+    return this.configureConversationalAutomation(vendorConfig, {
+      enableWelcomeMessage: true,
+      commands: defaultCommands,
+      prompts: defaultPrompts,
+    });
   }
 
   /**

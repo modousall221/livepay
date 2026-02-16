@@ -542,7 +542,7 @@ export async function registerRoutes(
       }
 
       const appHost = process.env.APP_HOST || 
-        (process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : `http://localhost:5000`);
+        (process.env.NODE_ENV === "production" ? "https://livepay.tech" : "http://localhost:5000");
 
       const result = await whatsappService.sendPaymentLink(
         invoice.clientPhone,
@@ -929,6 +929,170 @@ export async function registerRoutes(
     } catch (error) {
       console.error("WhatsApp test error:", error);
       res.status(500).json({ success: false, message: "Erreur de test WhatsApp" });
+    }
+  });
+
+  // ============================================================
+  // ADMIN BACKOFFICE ROUTES
+  // ============================================================
+
+  // Admin middleware - check if user has admin role
+  const isAdmin = (req: any, res: any, next: any) => {
+    if (!req.isAuthenticated()) {
+      return res.status(401).json({ message: "Non authentifié" });
+    }
+    const user = req.user as any;
+    if (user.role !== "admin") {
+      return res.status(403).json({ message: "Accès non autorisé - Admin requis" });
+    }
+    next();
+  };
+
+  // Get admin stats
+  app.get("/api/admin/stats", isAdmin, async (req: any, res) => {
+    try {
+      const stats = await storage.getAdminStats();
+      res.json(stats);
+    } catch (error) {
+      console.error("Error fetching admin stats:", error);
+      res.status(500).json({ message: "Failed to fetch stats" });
+    }
+  });
+
+  // Get all vendors
+  app.get("/api/admin/vendors", isAdmin, async (req: any, res) => {
+    try {
+      const vendors = await storage.getAllVendors();
+      res.json(vendors);
+    } catch (error) {
+      console.error("Error fetching vendors:", error);
+      res.status(500).json({ message: "Failed to fetch vendors" });
+    }
+  });
+
+  // Get vendor config by vendor ID
+  app.get("/api/admin/vendors/:vendorId/config", isAdmin, async (req: any, res) => {
+    try {
+      const { vendorId } = req.params;
+      const config = await storage.getVendorConfig(vendorId);
+      if (!config) {
+        return res.status(404).json({ message: "Config not found" });
+      }
+      res.json(config);
+    } catch (error) {
+      console.error("Error fetching vendor config:", error);
+      res.status(500).json({ message: "Failed to fetch vendor config" });
+    }
+  });
+
+  // Update vendor config (admin)
+  app.patch("/api/admin/vendors/:vendorId/config", isAdmin, async (req: any, res) => {
+    try {
+      const { vendorId } = req.params;
+      const updateData = req.body;
+
+      let config = await storage.getVendorConfig(vendorId);
+      if (!config) {
+        // Create config if doesn't exist
+        const vendor = await storage.getVendorById(vendorId);
+        if (!vendor) {
+          return res.status(404).json({ message: "Vendor not found" });
+        }
+        const businessName = updateData.businessName || vendor.businessName || vendor.email;
+        config = await storage.createVendorConfig({ vendorId, businessName, ...updateData });
+      } else {
+        config = await storage.updateVendorConfig(vendorId, updateData);
+      }
+
+      res.json(config);
+    } catch (error) {
+      console.error("Error updating vendor config:", error);
+      res.status(500).json({ message: "Failed to update vendor config" });
+    }
+  });
+
+  // Get all orders (admin)
+  app.get("/api/admin/orders", isAdmin, async (req: any, res) => {
+    try {
+      const orders = await storage.getAllOrders();
+      res.json(orders);
+    } catch (error) {
+      console.error("Error fetching orders:", error);
+      res.status(500).json({ message: "Failed to fetch orders" });
+    }
+  });
+
+  // ============================================================
+  // WHATSAPP CONVERSATIONAL AUTOMATION ROUTES
+  // ============================================================
+
+  // Get WhatsApp conversational automation config
+  app.get("/api/vendor/whatsapp-automation", isAuthenticated, async (req: any, res) => {
+    try {
+      const vendorId = (req.user as any).id;
+      const config = await storage.getVendorConfig(vendorId);
+      
+      if (!config?.whatsappPhoneNumberId || !config?.whatsappAccessToken) {
+        return res.status(400).json({ 
+          success: false, 
+          message: "Configuration WhatsApp incomplète" 
+        });
+      }
+
+      const result = await whatsappService.getConversationalAutomation(config);
+      res.json(result);
+    } catch (error) {
+      console.error("Error getting WhatsApp automation:", error);
+      res.status(500).json({ success: false, message: "Erreur serveur" });
+    }
+  });
+
+  // Configure WhatsApp conversational automation
+  app.post("/api/vendor/whatsapp-automation", isAuthenticated, async (req: any, res) => {
+    try {
+      const vendorId = (req.user as any).id;
+      const config = await storage.getVendorConfig(vendorId);
+      
+      if (!config?.whatsappPhoneNumberId || !config?.whatsappAccessToken) {
+        return res.status(400).json({ 
+          success: false, 
+          message: "Configuration WhatsApp incomplète. Configurez d'abord Phone Number ID et Access Token." 
+        });
+      }
+
+      const { enableWelcomeMessage, commands, prompts } = req.body;
+      
+      const result = await whatsappService.configureConversationalAutomation(config, {
+        enableWelcomeMessage,
+        commands,
+        prompts,
+      });
+
+      res.json(result);
+    } catch (error) {
+      console.error("Error configuring WhatsApp automation:", error);
+      res.status(500).json({ success: false, message: "Erreur serveur" });
+    }
+  });
+
+  // Setup default WhatsApp commands for LivePay
+  app.post("/api/vendor/whatsapp-automation/setup-defaults", isAuthenticated, async (req: any, res) => {
+    try {
+      const vendorId = (req.user as any).id;
+      const config = await storage.getVendorConfig(vendorId);
+      
+      if (!config?.whatsappPhoneNumberId || !config?.whatsappAccessToken) {
+        return res.status(400).json({ 
+          success: false, 
+          message: "Configuration WhatsApp incomplète. Configurez d'abord Phone Number ID et Access Token." 
+        });
+      }
+
+      const result = await whatsappService.setupDefaultCommands(config);
+      res.json(result);
+    } catch (error) {
+      console.error("Error setting up WhatsApp defaults:", error);
+      res.status(500).json({ success: false, message: "Erreur serveur" });
     }
   });
 

@@ -1,5 +1,8 @@
 import { sql } from "drizzle-orm";
-import { index, jsonb, pgTable, timestamp, varchar } from "drizzle-orm/pg-core";
+import { index, jsonb, pgTable, timestamp, varchar, pgEnum } from "drizzle-orm/pg-core";
+
+// Role enum pour les utilisateurs
+export const userRoleEnum = pgEnum("user_role", ["vendor", "admin"]);
 
 // Session storage table for express-session
 export const sessions = pgTable(
@@ -21,6 +24,7 @@ export const users = pgTable("users", {
   lastName: varchar("last_name"),
   businessName: varchar("business_name"),
   phone: varchar("phone"),
+  role: userRoleEnum("role").default("vendor").notNull(),
   profileImageUrl: varchar("profile_image_url"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),

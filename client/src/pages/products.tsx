@@ -1,5 +1,5 @@
-import { useQuery, useMutation } from "@tanstack/react-query";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { useState, useEffect, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,15 +15,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { insertProductSchema, type Product, type InsertProduct } from "@shared/schema";
-import { Plus, Package, Trash2, Pencil, Share2, QrCode, Star, ImageIcon, Tag, Percent, Upload, X, Loader2 } from "lucide-react";
-import { useToast } from "@/hooks/use-toast";
-import { isUnauthorizedError } from "@/lib/auth-utils";
-import { useState, useEffect, useRef } from "react";
-import { ProductShareDialog } from "@/components/product-share-dialog";
-import { uploadImage } from "@/lib/firebase";
 import {
   Select,
   SelectContent,
@@ -31,6 +22,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Plus, Package, Trash2, Pencil, Share2, Star, ImageIcon, Tag, Percent, Upload, X, Loader2 } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
+import { ProductShareDialog } from "@/components/product-share-dialog";
+import { 
+  getProducts, 
+  createProduct, 
+  updateProduct, 
+  deleteProduct,
+  uploadImage,
+  type Product 
+} from "@/lib/firebase";
 
 // Catégories prédéfinies
 const PRODUCT_CATEGORIES = [
@@ -45,28 +48,77 @@ const PRODUCT_CATEGORIES = [
   { value: "autre", label: "Autre" },
 ];
 
+interface ProductFormData {
+  keyword: string;
+  name: string;
+  price: number;
+  stock: number;
+  description: string;
+  imageUrl: string;
+  category: string;
+  originalPrice: number;
+  featured: boolean;
+  active: boolean;
+}
+
+const defaultFormData: ProductFormData = {
+  keyword: "",
+  name: "",
+  price: 0,
+  stock: 0,
+  description: "",
+  imageUrl: "",
+  category: "",
+  originalPrice: 0,
+  featured: false,
+  active: true,
+};
+
 export default function Products() {
   const { toast } = useToast();
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+  
   const [open, setOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isDeleting, setIsDeleting] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  const [products, setProducts] = useState<Product[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [formData, setFormData] = useState<ProductFormData>(defaultFormData);
 
-  const { data: products, isLoading } = useQuery<Product[]>({
-    queryKey: ["/api/products"],
-  });
+  // Load products from Firebase
+  useEffect(() => {
+    if (!user) return;
+    
+    const loadProducts = async () => {
+      try {
+        setIsLoading(true);
+        const data = await getProducts(user.id);
+        setProducts(data);
+      } catch (error) {
+        console.error("Error loading products:", error);
+        toast({ title: "Erreur", description: "Impossible de charger les produits", variant: "destructive" });
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    loadProducts();
+  }, [user, toast]);
 
   // Image upload handler - Firebase Storage
   const handleImageUpload = async (file: File) => {
     if (!file) return;
     
-    // Validate file size (max 5MB)
     if (file.size > 5 * 1024 * 1024) {
       toast({ title: "Erreur", description: "Image trop volumineuse (max 5MB)", variant: "destructive" });
       return;
     }
     
-    // Validate file type
     const validTypes = ["image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp"];
     if (!validTypes.includes(file.type)) {
       toast({ title: "Erreur", description: "Format non supporté. Utilisez JPG, PNG, GIF ou WebP", variant: "destructive" });
@@ -80,7 +132,7 @@ export default function Products() {
       const path = `products/${uniqueName}.${extension}`;
       
       const downloadUrl = await uploadImage(file, path);
-      form.setValue("imageUrl", downloadUrl);
+      setFormData(prev => ({ ...prev, imageUrl: downloadUrl }));
       toast({ title: "Image uploadée !" });
     } catch (error: any) {
       console.error("Upload error:", error);
@@ -90,32 +142,10 @@ export default function Products() {
     }
   };
 
-  const form = useForm<InsertProduct>({
-    resolver: zodResolver(
-      insertProductSchema.extend({
-        keyword: insertProductSchema.shape.keyword.min(1, "Mot-clé requis"),
-        name: insertProductSchema.shape.name.min(1, "Nom requis"),
-        price: insertProductSchema.shape.price.min(1, "Prix requis"),
-      })
-    ),
-    defaultValues: {
-      keyword: "",
-      name: "",
-      price: 0,
-      stock: 0,
-      description: "",
-      imageUrl: "",
-      category: "",
-      originalPrice: 0,
-      featured: false,
-      active: true,
-    },
-  });
-
-  // Reset form when dialog closes or when editing a product
+  // Reset form when dialog opens/closes
   useEffect(() => {
     if (editingProduct) {
-      form.reset({
+      setFormData({
         keyword: editingProduct.keyword || "",
         name: editingProduct.name,
         price: editingProduct.price,
@@ -128,107 +158,13 @@ export default function Products() {
         active: editingProduct.active,
       });
     } else if (!open) {
-      form.reset({
-        keyword: "",
-        name: "",
-        price: 0,
-        stock: 0,
-        description: "",
-        imageUrl: "",
-        category: "",
-        originalPrice: 0,
-        featured: false,
-        active: true,
-      });
+      setFormData(defaultFormData);
     }
-  }, [editingProduct, open, form]);
-
-  const createMutation = useMutation({
-    mutationFn: (data: InsertProduct) => apiRequest("POST", "/api/products", data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
-      form.reset();
-      setOpen(false);
-      toast({ title: "Produit créé" });
-    },
-    onError: (error: Error) => {
-      if (isUnauthorizedError(error)) {
-        toast({ title: "Non autorisé", description: "Reconnexion...", variant: "destructive" });
-        setTimeout(() => { window.location.href = "/api/login"; }, 500);
-        return;
-      }
-      toast({ title: "Erreur", description: error.message, variant: "destructive" });
-    },
-  });
-
-  const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Partial<InsertProduct> }) => 
-      apiRequest("PATCH", `/api/products/${id}`, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
-      setEditingProduct(null);
-      setOpen(false);
-      toast({ title: "Produit mis à jour" });
-    },
-    onError: (error: Error) => {
-      if (isUnauthorizedError(error)) {
-        toast({ title: "Non autorisé", description: "Reconnexion...", variant: "destructive" });
-        setTimeout(() => { window.location.href = "/api/login"; }, 500);
-        return;
-      }
-      toast({ title: "Erreur", description: error.message, variant: "destructive" });
-    },
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => apiRequest("DELETE", `/api/products/${id}`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
-      toast({ title: "Produit supprimé" });
-    },
-    onError: (error: Error) => {
-      if (isUnauthorizedError(error)) {
-        toast({ title: "Non autorisé", description: "Reconnexion...", variant: "destructive" });
-        setTimeout(() => { window.location.href = "/api/login"; }, 500);
-        return;
-      }
-      toast({ title: "Erreur", description: error.message, variant: "destructive" });
-    },
-  });
-
-  const toggleActiveMutation = useMutation({
-    mutationFn: ({ id, active }: { id: string; active: boolean }) =>
-      apiRequest("PATCH", `/api/products/${id}`, { active }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
-    },
-    onError: (error: Error) => {
-      toast({ title: "Erreur", description: error.message, variant: "destructive" });
-    },
-  });
-
-  const onSubmit = (data: InsertProduct) => {
-    if (editingProduct) {
-      updateMutation.mutate({ id: editingProduct.id, data });
-    } else {
-      createMutation.mutate(data);
-    }
-  };
+  }, [editingProduct, open]);
 
   const handleOpenCreate = () => {
     setEditingProduct(null);
-    form.reset({
-      keyword: "",
-      name: "",
-      price: 0,
-      stock: 0,
-      description: "",
-      imageUrl: "",
-      category: "",
-      originalPrice: 0,
-      featured: false,
-      active: true,
-    });
+    setFormData(defaultFormData);
     setOpen(true);
   };
 
@@ -237,111 +173,194 @@ export default function Products() {
     setOpen(true);
   };
 
-  const handleDialogChange = (isOpen: boolean) => {
-    setOpen(isOpen);
-    if (!isOpen) {
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+    
+    // Validation
+    if (!formData.keyword.trim()) {
+      toast({ title: "Erreur", description: "Mot-clé requis", variant: "destructive" });
+      return;
+    }
+    if (!formData.name.trim()) {
+      toast({ title: "Erreur", description: "Nom requis", variant: "destructive" });
+      return;
+    }
+    if (formData.price <= 0) {
+      toast({ title: "Erreur", description: "Prix doit être supérieur à 0", variant: "destructive" });
+      return;
+    }
+    
+    setIsSubmitting(true);
+    try {
+      if (editingProduct) {
+        await updateProduct(editingProduct.id, formData);
+        toast({ title: "Produit mis à jour" });
+      } else {
+        await createProduct({
+          ...formData,
+          vendorId: user.id,
+        });
+        toast({ title: "Produit créé" });
+      }
+      
+      // Reload products
+      const data = await getProducts(user.id);
+      setProducts(data);
+      setOpen(false);
       setEditingProduct(null);
+    } catch (error: any) {
+      console.error("Submit error:", error);
+      toast({ title: "Erreur", description: error.message, variant: "destructive" });
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  return (
-    <div className="p-4 md:p-6 space-y-6 max-w-5xl">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold" data-testid="text-products-title">Produits</h1>
-          <p className="text-sm text-muted-foreground mt-1">Gérez vos produits avec mots-clés pour le chatbot WhatsApp</p>
+  const handleDelete = async (productId: string) => {
+    if (!user) return;
+    if (!confirm("Supprimer ce produit ?")) return;
+    
+    setIsDeleting(productId);
+    try {
+      await deleteProduct(productId);
+      toast({ title: "Produit supprimé" });
+      const data = await getProducts(user.id);
+      setProducts(data);
+    } catch (error: any) {
+      console.error("Delete error:", error);
+      toast({ title: "Erreur", description: error.message, variant: "destructive" });
+    } finally {
+      setIsDeleting(null);
+    }
+  };
+
+  const getCategoryLabel = (value: string) => {
+    return PRODUCT_CATEGORIES.find(c => c.value === value)?.label || value;
+  };
+
+  if (isLoading) {
+    return (
+      <div className="p-6 space-y-6">
+        <div className="flex justify-between items-center">
+          <Skeleton className="h-8 w-48" />
+          <Skeleton className="h-10 w-32" />
         </div>
-        <Dialog open={open} onOpenChange={handleDialogChange}>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          {[1,2,3,4].map(i => (
+            <Card key={i} className="overflow-hidden">
+              <Skeleton className="h-24 w-full" />
+              <div className="p-4 space-y-2">
+                <Skeleton className="h-4 w-3/4" />
+                <Skeleton className="h-4 w-1/2" />
+              </div>
+            </Card>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-6 space-y-6">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div>
+          <h1 className="text-2xl font-bold">Mes Produits</h1>
+          <p className="text-muted-foreground">{products.length} produit(s)</p>
+        </div>
+        
+        <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
-            <Button onClick={handleOpenCreate} data-testid="button-add-product">
+            <Button onClick={handleOpenCreate} className="bg-green-600 hover:bg-green-700">
               <Plus className="w-4 h-4 mr-2" />
               Ajouter
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-h-[90vh] overflow-y-auto">
+          <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>{editingProduct ? "Modifier le produit" : "Nouveau produit"}</DialogTitle>
+              <DialogTitle>
+                {editingProduct ? "Modifier le produit" : "Nouveau produit"}
+              </DialogTitle>
             </DialogHeader>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+            
+            <form onSubmit={handleSubmit} className="space-y-4">
+              {/* Keyword */}
               <div className="space-y-2">
-                <Label htmlFor="keyword">Mot-clé WhatsApp</Label>
+                <Label htmlFor="keyword" className="flex items-center gap-2">
+                  <Tag className="w-4 h-4" />
+                  Mot-clé (pour WhatsApp) *
+                </Label>
                 <Input
                   id="keyword"
-                  {...form.register("keyword")}
-                  placeholder="Ex: ROBE1, CHAUSSURE2"
-                  className="font-mono uppercase"
-                  data-testid="input-product-keyword"
+                  value={formData.keyword}
+                  onChange={e => setFormData(prev => ({ ...prev, keyword: e.target.value.toUpperCase() }))}
+                  placeholder="ROBE1"
+                  className="uppercase"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Le client enverra ce mot-clé sur WhatsApp pour commander
+                  Le client envoie ce mot pour commander
                 </p>
-                {form.formState.errors.keyword && (
-                  <p className="text-xs text-destructive">{form.formState.errors.keyword.message}</p>
-                )}
               </div>
+
+              {/* Name */}
               <div className="space-y-2">
-                <Label htmlFor="name">Nom</Label>
+                <Label htmlFor="name">Nom du produit *</Label>
                 <Input
                   id="name"
-                  {...form.register("name")}
-                  placeholder="Ex: Robe Wax"
-                  data-testid="input-product-name"
+                  value={formData.name}
+                  onChange={e => setFormData(prev => ({ ...prev, name: e.target.value }))}
+                  placeholder="Robe été fleurie"
                 />
-                {form.formState.errors.name && (
-                  <p className="text-xs text-destructive">{form.formState.errors.name.message}</p>
-                )}
               </div>
+
+              {/* Price */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="price">Prix (FCFA)</Label>
+                  <Label htmlFor="price">Prix (FCFA) *</Label>
                   <Input
                     id="price"
                     type="number"
-                    {...form.register("price", { valueAsNumber: true })}
+                    value={formData.price || ""}
+                    onChange={e => setFormData(prev => ({ ...prev, price: parseInt(e.target.value) || 0 }))}
                     placeholder="15000"
-                    data-testid="input-product-price"
                   />
-                  {form.formState.errors.price && (
-                    <p className="text-xs text-destructive">{form.formState.errors.price.message}</p>
-                  )}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="stock">Stock</Label>
                   <Input
                     id="stock"
                     type="number"
-                    {...form.register("stock", { valueAsNumber: true })}
+                    value={formData.stock || ""}
+                    onChange={e => setFormData(prev => ({ ...prev, stock: parseInt(e.target.value) || 0 }))}
                     placeholder="10"
-                    data-testid="input-product-stock"
                   />
                 </div>
               </div>
+
+              {/* Description */}
               <div className="space-y-2">
                 <Label htmlFor="description">Description</Label>
                 <Textarea
                   id="description"
-                  {...form.register("description")}
-                  placeholder="Description du produit"
-                  className="resize-none"
-                  data-testid="input-product-description"
+                  value={formData.description}
+                  onChange={e => setFormData(prev => ({ ...prev, description: e.target.value }))}
+                  placeholder="Description du produit..."
+                  rows={3}
                 />
               </div>
 
               {/* Category */}
               <div className="space-y-2">
-                <Label htmlFor="category" className="flex items-center gap-2">
-                  <Tag className="w-4 h-4" />
-                  Catégorie
-                </Label>
-                <Select
-                  value={form.watch("category") || ""}
-                  onValueChange={(value) => form.setValue("category", value)}
+                <Label>Catégorie</Label>
+                <Select 
+                  value={formData.category} 
+                  onValueChange={value => setFormData(prev => ({ ...prev, category: value }))}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Choisir une catégorie" />
+                    <SelectValue placeholder="Sélectionner..." />
                   </SelectTrigger>
                   <SelectContent>
-                    {PRODUCT_CATEGORIES.map((cat) => (
+                    {PRODUCT_CATEGORIES.map(cat => (
                       <SelectItem key={cat.value} value={cat.value}>
                         {cat.label}
                       </SelectItem>
@@ -356,88 +375,80 @@ export default function Products() {
                   <ImageIcon className="w-4 h-4" />
                   Image du produit
                 </Label>
-                
-                {/* Hidden file input */}
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/jpeg,image/jpg,image/png,image/gif,image/webp"
-                  className="hidden"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) handleImageUpload(file);
-                  }}
-                />
-                
-                {/* Preview or Upload Zone */}
-                {form.watch("imageUrl") ? (
-                  <div className="relative w-full h-40 bg-gray-100 rounded-lg overflow-hidden border-2 border-dashed border-gray-300">
-                    <img
-                      src={form.watch("imageUrl")}
-                      alt="Aperçu"
-                      className="w-full h-full object-cover"
-                      onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-                    />
-                    <Button
-                      type="button"
-                      variant="destructive"
-                      size="icon"
-                      className="absolute top-2 right-2"
-                      onClick={() => form.setValue("imageUrl", "")}
+                <div className="space-y-2">
+                  {formData.imageUrl ? (
+                    <div className="relative inline-block">
+                      <img 
+                        src={formData.imageUrl} 
+                        alt="Preview" 
+                        className="w-32 h-32 object-cover rounded-lg border"
+                      />
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        size="icon"
+                        className="absolute -top-2 -right-2 h-6 w-6"
+                        onClick={() => setFormData(prev => ({ ...prev, imageUrl: "" }))}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <div
+                      className="border-2 border-dashed rounded-lg p-6 text-center cursor-pointer hover:bg-muted/50 transition-colors"
+                      onClick={() => fileInputRef.current?.click()}
                     >
-                      <X className="w-4 h-4" />
-                    </Button>
-                  </div>
-                ) : (
-                  <div
-                    onClick={() => fileInputRef.current?.click()}
-                    className="w-full h-40 border-2 border-dashed border-gray-300 rounded-lg flex flex-col items-center justify-center gap-2 cursor-pointer hover:border-primary hover:bg-gray-50 dark:hover:bg-gray-900 transition-colors"
-                  >
-                    {isUploading ? (
-                      <>
-                        <Loader2 className="w-8 h-8 text-primary animate-spin" />
-                        <span className="text-sm text-muted-foreground">Upload en cours...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Upload className="w-8 h-8 text-muted-foreground" />
-                        <span className="text-sm text-muted-foreground">Cliquez pour uploader</span>
-                        <span className="text-xs text-muted-foreground">JPG, PNG, GIF, WebP (max 5MB)</span>
-                      </>
-                    )}
-                  </div>
-                )}
-                
-                {/* URL Input as alternative */}
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground">ou</span>
+                      {isUploading ? (
+                        <div className="flex flex-col items-center gap-2">
+                          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                          <p className="text-sm text-muted-foreground">Upload en cours...</p>
+                        </div>
+                      ) : (
+                        <div className="flex flex-col items-center gap-2">
+                          <Upload className="h-8 w-8 text-muted-foreground" />
+                          <p className="text-sm text-muted-foreground">Cliquez pour uploader</p>
+                          <p className="text-xs text-muted-foreground">JPG, PNG, GIF, WebP - Max 5MB</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/jpeg,image/jpg,image/png,image/gif,image/webp"
+                    className="hidden"
+                    onChange={e => {
+                      const file = e.target.files?.[0];
+                      if (file) handleImageUpload(file);
+                      e.target.value = "";
+                    }}
+                  />
+                  <p className="text-xs text-muted-foreground">Ou collez une URL:</p>
                   <Input
-                    id="imageUrl"
-                    {...form.register("imageUrl")}
-                    placeholder="Coller une URL d'image..."
+                    value={formData.imageUrl}
+                    onChange={e => setFormData(prev => ({ ...prev, imageUrl: e.target.value }))}
+                    placeholder="https://..."
                     className="text-sm"
                   />
                 </div>
               </div>
 
-              {/* Original Price (for promotions) */}
+              {/* Original Price */}
               <div className="space-y-2">
                 <Label htmlFor="originalPrice" className="flex items-center gap-2">
                   <Percent className="w-4 h-4" />
-                  Prix barré (optionnel)
+                  Prix barré (promo)
                 </Label>
                 <Input
                   id="originalPrice"
                   type="number"
-                  {...form.register("originalPrice", { valueAsNumber: true })}
+                  value={formData.originalPrice || ""}
+                  onChange={e => setFormData(prev => ({ ...prev, originalPrice: parseInt(e.target.value) || 0 }))}
                   placeholder="20000"
                 />
-                <p className="text-xs text-muted-foreground">
-                  Ancien prix affiché barré pour montrer la promotion
-                </p>
               </div>
 
-              {/* Featured toggle */}
+              {/* Featured & Active */}
               <div className="flex items-center justify-between py-2 border rounded-lg px-3 bg-amber-50 dark:bg-amber-950/20">
                 <div className="flex items-center gap-2">
                   <Star className="w-4 h-4 text-amber-500" />
@@ -445,179 +456,138 @@ export default function Products() {
                 </div>
                 <Switch
                   id="featured"
-                  checked={form.watch("featured")}
-                  onCheckedChange={(checked) => form.setValue("featured", checked)}
+                  checked={formData.featured}
+                  onCheckedChange={checked => setFormData(prev => ({ ...prev, featured: checked }))}
                 />
               </div>
 
-              <div className="flex items-center justify-between">
-                <Label htmlFor="active">Actif</Label>
+              <div className="flex items-center justify-between py-2 border rounded-lg px-3">
+                <Label htmlFor="active">Actif (visible)</Label>
                 <Switch
                   id="active"
-                  checked={form.watch("active")}
-                  onCheckedChange={(checked) => form.setValue("active", checked)}
+                  checked={formData.active}
+                  onCheckedChange={checked => setFormData(prev => ({ ...prev, active: checked }))}
                 />
               </div>
-              <Button
-                type="submit"
-                className="w-full"
-                disabled={createMutation.isPending || updateMutation.isPending}
-                data-testid="button-submit-product"
-              >
-                {createMutation.isPending || updateMutation.isPending
-                  ? "Enregistrement..."
-                  : editingProduct
-                  ? "Mettre à jour"
-                  : "Créer le produit"}
+
+              <Button type="submit" className="w-full" disabled={isSubmitting}>
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    {editingProduct ? "Mise à jour..." : "Création..."}
+                  </>
+                ) : (
+                  editingProduct ? "Mettre à jour" : "Créer"
+                )}
               </Button>
             </form>
           </DialogContent>
         </Dialog>
       </div>
 
-      {isLoading ? (
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {[1, 2, 3].map((i) => (
-            <Card key={i} className="p-4">
-              <Skeleton className="h-5 w-32 mb-2" />
-              <Skeleton className="h-4 w-20 mb-4" />
-              <Skeleton className="h-3 w-full" />
-            </Card>
-          ))}
-        </div>
-      ) : products?.length === 0 ? (
-        <Card className="p-12 flex flex-col items-center gap-4 text-center">
-          <div className="w-12 h-12 rounded-md bg-muted flex items-center justify-center">
-            <Package className="w-6 h-6 text-muted-foreground" />
-          </div>
-          <div>
-            <h3 className="font-semibold">Aucun produit</h3>
-            <p className="text-sm text-muted-foreground mt-1">
-              Ajoutez vos premiers produits pour commencer à vendre en live.
-            </p>
-          </div>
+      {products.length === 0 ? (
+        <Card className="p-12 text-center">
+          <Package className="w-16 h-16 mx-auto text-muted-foreground mb-4" />
+          <h3 className="text-lg font-semibold mb-2">Aucun produit</h3>
+          <p className="text-muted-foreground mb-4">
+            Créez votre premier produit pour commencer à vendre
+          </p>
+          <Button onClick={handleOpenCreate} className="bg-green-600 hover:bg-green-700">
+            <Plus className="w-4 h-4 mr-2" />
+            Créer un produit
+          </Button>
         </Card>
       ) : (
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {products?.map((product) => {
-            const availableStock = product.stock - (product.reservedStock || 0);
-            const isLowStock = availableStock <= 3 && product.active;
-            const categoryLabel = PRODUCT_CATEGORIES.find(c => c.value === product.category)?.label;
-            return (
-            <Card key={product.id} className={`overflow-hidden hover-elevate ${isLowStock ? "border-amber-300" : ""} ${product.featured ? "ring-2 ring-amber-400" : ""}`} data-testid={`card-product-${product.id}`}>
-              {/* Image thumbnail */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          {products.map(product => (
+            <Card key={product.id} className="overflow-hidden group">
               {product.imageUrl && product.imageUrl.trim() ? (
-                <div className="relative h-32 bg-gray-100">
+                <div className="relative h-32 bg-gray-100 dark:bg-gray-800">
                   <img
                     src={product.imageUrl}
                     alt={product.name}
                     className="w-full h-full object-cover"
-                    onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                    onError={e => (e.currentTarget.style.display = "none")}
                   />
                   {product.featured && (
-                    <div className="absolute top-2 left-2">
-                      <Badge className="bg-amber-500 text-white">
-                        <Star className="w-3 h-3 mr-1 fill-current" />
-                        Vedette
-                      </Badge>
-                    </div>
+                    <Badge className="absolute top-2 left-2 bg-amber-500 text-white">
+                      <Star className="w-3 h-3 mr-1 fill-current" />
+                      Vedette
+                    </Badge>
                   )}
                 </div>
               ) : (
-                <div className="relative h-24 bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-800 dark:to-gray-700 flex items-center justify-center">
-                  <Package className="w-8 h-8 text-gray-300" />
+                <div className="relative h-32 bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-800 dark:to-gray-700 flex items-center justify-center">
+                  <Package className="w-10 h-10 text-gray-300" />
                   {product.featured && (
-                    <div className="absolute top-2 left-2">
-                      <Badge className="bg-amber-500 text-white">
-                        <Star className="w-3 h-3 mr-1 fill-current" />
-                        Vedette
-                      </Badge>
-                    </div>
+                    <Badge className="absolute top-2 left-2 bg-amber-500 text-white">
+                      <Star className="w-3 h-3 mr-1 fill-current" />
+                      Vedette
+                    </Badge>
                   )}
                 </div>
               )}
               
               <div className="p-4">
-                <div className="flex items-start justify-between gap-2">
+                <div className="flex items-start justify-between gap-2 mb-2">
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center flex-wrap gap-1 mb-1">
-                      <Badge variant="outline" className="font-mono text-xs">
-                        {product.keyword}
-                      </Badge>
-                      {product.shareCode && (
-                        <Badge variant="secondary" className="font-mono text-xs">
-                          #{product.shareCode}
-                        </Badge>
-                      )}
-                      {categoryLabel && (
-                        <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
-                          {categoryLabel}
-                        </Badge>
-                      )}
-                      {!product.active && <Badge variant="secondary">Inactif</Badge>}
-                    </div>
-                    <h3 className="font-semibold truncate" data-testid={`text-product-name-${product.id}`}>
-                      {product.name}
-                    </h3>
-                    <div className="flex items-center gap-2 mt-1">
-                      <p className="text-lg font-bold text-primary">
-                        {product.price.toLocaleString("fr-FR")} F
+                    <Badge variant="outline" className="text-xs mb-1">
+                      {product.keyword}
+                    </Badge>
+                    <h3 className="font-semibold truncate">{product.name}</h3>
+                    {product.category && (
+                      <p className="text-xs text-muted-foreground">
+                        {getCategoryLabel(product.category)}
                       </p>
-                      {product.originalPrice && product.originalPrice > 0 && product.originalPrice > product.price && (
-                        <p className="text-sm text-muted-foreground line-through">
-                          {product.originalPrice.toLocaleString("fr-FR")} F
-                        </p>
-                      )}
-                    </div>
+                    )}
                   </div>
-                  <div className="flex items-center gap-1 shrink-0">
-                    <ProductShareDialog
-                      productId={product.id}
-                      productName={product.name}
-                      trigger={
-                      <Button size="icon" variant="ghost" className="text-green-600 hover:text-green-700 hover:bg-green-50">
-                        <QrCode className="w-4 h-4" />
-                      </Button>
-                    }
-                  />
-                  <Switch
-                    checked={product.active}
-                    onCheckedChange={(checked) =>
-                      toggleActiveMutation.mutate({ id: product.id, active: checked })
-                    }
-                    disabled={toggleActiveMutation.isPending}
-                  />
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    onClick={() => handleOpenEdit(product)}
-                    data-testid={`button-edit-product-${product.id}`}
-                  >
-                    <Pencil className="w-4 h-4 text-muted-foreground" />
-                  </Button>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    onClick={() => deleteMutation.mutate(product.id)}
-                    disabled={deleteMutation.isPending}
-                    data-testid={`button-delete-product-${product.id}`}
-                  >
-                    <Trash2 className="w-4 h-4 text-muted-foreground" />
-                  </Button>
+                  <Badge variant={product.active ? "default" : "secondary"}>
+                    {product.active ? "Actif" : "Inactif"}
+                  </Badge>
                 </div>
-                </div>
-                <div className="flex items-center justify-between mt-3 pt-3 border-t">
-                  <span className="text-sm text-muted-foreground">Stock</span>
-                  <span className={`font-bold ${isLowStock ? "text-amber-600" : availableStock > 0 ? "text-green-600" : "text-red-600"}`}>
-                    {availableStock} {product.reservedStock > 0 && <span className="text-xs font-normal text-muted-foreground">({product.reservedStock} réservé)</span>}
+                
+                <div className="flex items-baseline gap-2 mb-3">
+                  <span className="text-lg font-bold text-green-600">
+                    {product.price.toLocaleString("fr-FR")} F
                   </span>
+                  {product.originalPrice && product.originalPrice > product.price && (
+                    <span className="text-sm text-muted-foreground line-through">
+                      {product.originalPrice.toLocaleString("fr-FR")} F
+                    </span>
+                  )}
                 </div>
-                {product.description && (
-                  <p className="text-sm text-muted-foreground mt-2 line-clamp-2">{product.description}</p>
-                )}
+                
+                <p className="text-sm text-muted-foreground mb-3">
+                  Stock: {product.stock - (product.reservedStock || 0)} disponible(s)
+                </p>
+                
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="flex-1"
+                    onClick={() => handleOpenEdit(product)}
+                  >
+                    <Pencil className="w-4 h-4 mr-1" />
+                    Modifier
+                  </Button>
+                  <ProductShareDialog product={product} />
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => handleDelete(product.id)}
+                    disabled={isDeleting === product.id}
+                  >
+                    {isDeleting === product.id ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="w-4 h-4" />
+                    )}
+                  </Button>
+                </div>
               </div>
             </Card>
-          )})}
+          ))}
         </div>
       )}
     </div>

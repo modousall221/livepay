@@ -1,13 +1,20 @@
-import { useQuery, useMutation } from "@tanstack/react-query";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Radio, Shield, Clock, CheckCircle2, XCircle, Loader2, CreditCard, Smartphone, Banknote, Copy, Phone, ExternalLink } from "lucide-react";
 import { useRoute, useSearch } from "wouter";
 import { useToast } from "@/hooks/use-toast";
-import { useState, useEffect } from "react";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { 
+  getOrderByToken, 
+  getProduct, 
+  getUserProfile, 
+  getVendorConfig, 
+  updateOrder,
+  Order,
+  PaymentMethod as FirebasePaymentMethod
+} from "@/lib/firebase";
 
 type PaymentInvoice = {
   id: string;
@@ -17,6 +24,7 @@ type PaymentInvoice = {
   status: string;
   expiresAt: string;
   vendorName: string;
+  vendorPhone?: string;
 };
 
 type PaymentMethod = {
@@ -37,6 +45,13 @@ type PaymentResult = {
   amount?: number;
   providerRef?: string;
 };
+
+const DEFAULT_PAYMENT_METHODS: PaymentMethod[] = [
+  { id: "wave", name: "Wave", description: "Paiement mobile", icon: "wave" },
+  { id: "orange_money", name: "Orange Money", description: "Paiement mobile", icon: "orange" },
+  { id: "card", name: "Carte bancaire", description: "Visa / Mastercard", icon: "card" },
+  { id: "cash", name: "Espèces", description: "Main propre", icon: "cash" },
+];
 
 const methodIcons: Record<string, typeof Smartphone> = {
   wave: Smartphone,
@@ -71,26 +86,61 @@ export default function Pay() {
   const [selectedMethod, setSelectedMethod] = useState<string>("wave");
   const [waitingPayment, setWaitingPayment] = useState(false);
   const [paymentResult, setPaymentResult] = useState<PaymentResult | null>(null);
+  
+  // Firebase state
+  const [invoice, setInvoice] = useState<PaymentInvoice | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [order, setOrder] = useState<Order | null>(null);
 
-  const { data: invoice, isLoading, error } = useQuery<PaymentInvoice>({
-    queryKey: ["/api/pay", token],
-    queryFn: async () => {
-      const res = await fetch(`/api/pay/${token}`);
-      if (!res.ok) throw new Error(`${res.status}: ${res.statusText}`);
-      return res.json();
-    },
-    enabled: !!token,
-    refetchInterval: waitingPayment ? 3000 : 5000,
-  });
+  const methods = DEFAULT_PAYMENT_METHODS;
 
-  const { data: methods } = useQuery<PaymentMethod[]>({
-    queryKey: ["/api/payment-methods"],
-    queryFn: async () => {
-      const res = await fetch("/api/payment-methods");
-      if (!res.ok) throw new Error(`${res.status}`);
-      return res.json();
-    },
-  });
+  // Load order and related data
+  useEffect(() => {
+    if (!token) return;
+    
+    const loadData = async () => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        const orderData = await getOrderByToken(token);
+        if (!orderData) {
+          throw new Error("Order not found");
+        }
+        setOrder(orderData);
+        
+        // Get product info
+        const product = await getProduct(orderData.productId);
+        
+        // Get vendor info
+        const vendorProfile = await getUserProfile(orderData.vendorId);
+        const vendorConfig = await getVendorConfig(orderData.vendorId);
+        
+        // Calculate expiration
+        const expiresAt = orderData.reservedUntil || 
+          new Date(orderData.createdAt.getTime() + 30 * 60 * 1000); // 30 min default
+        
+        setInvoice({
+          id: orderData.id,
+          productName: product?.name || "Produit",
+          amount: orderData.totalAmount,
+          clientName: orderData.clientName || orderData.clientPhone,
+          status: orderData.status,
+          expiresAt: expiresAt.toISOString(),
+          vendorName: vendorProfile?.displayName || vendorConfig?.businessName || "Vendeur",
+          vendorPhone: vendorConfig?.whatsappNumber,
+        });
+      } catch (err) {
+        console.error("Error loading payment data:", err);
+        setError(err as Error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    loadData();
+  }, [token]);
 
   useEffect(() => {
     if ((returnStatus === "completed" || returnStatus === "failed") && token) {
@@ -98,20 +148,18 @@ export default function Pay() {
     }
   }, [returnStatus, token]);
 
+  // Poll for payment status when waiting
   useEffect(() => {
     if (!waitingPayment || !token) return;
 
     const pollInterval = setInterval(async () => {
       try {
-        const res = await fetch(`/api/pay/${token}/status`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data.status === "paid") {
-            setWaitingPayment(false);
-            queryClient.invalidateQueries({ queryKey: ["/api/pay", token] });
-            toast({ title: "Paiement confirme" });
-            clearInterval(pollInterval);
-          }
+        const orderData = await getOrderByToken(token);
+        if (orderData && orderData.status === "paid") {
+          setWaitingPayment(false);
+          setInvoice(prev => prev ? { ...prev, status: "paid" } : null);
+          toast({ title: "Paiement confirmé" });
+          clearInterval(pollInterval);
         }
       } catch {}
     }, 3000);
@@ -122,7 +170,7 @@ export default function Pay() {
   useEffect(() => {
     if (waitingPayment && invoice?.status === "paid") {
       setWaitingPayment(false);
-      toast({ title: "Paiement confirme" });
+      toast({ title: "Paiement confirmé" });
     }
   }, [waitingPayment, invoice?.status, toast]);
 
@@ -135,7 +183,7 @@ export default function Pay() {
       const diff = exp - now;
 
       if (diff <= 0) {
-        setTimeLeft("Expire");
+        setTimeLeft("Expiré");
         setExpired(true);
         clearInterval(interval);
         return;
@@ -149,32 +197,56 @@ export default function Pay() {
     return () => clearInterval(interval);
   }, [invoice?.expiresAt, invoice?.status]);
 
-  const payMutation = useMutation({
-    mutationFn: async () => {
-      const res = await apiRequest("POST", `/api/pay/${token}`, { paymentMethod: selectedMethod });
-      return res.json();
-    },
-    onSuccess: (data: PaymentResult) => {
-      if (data.success) {
-        // Show payment instructions with deep link and USSD
-        setPaymentResult(data);
-        
-        // If there's a deep link, try to open the app
-        if (data.deepLink) {
-          // Try to open the mobile money app
-          window.location.href = data.deepLink;
-        }
-        
-        // Start polling for payment confirmation
-        setWaitingPayment(true);
-      } else {
-        toast({ title: "Erreur", description: "Échec de l'initialisation du paiement", variant: "destructive" });
+  const handlePayment = async () => {
+    if (!order || !token) return;
+    
+    setIsProcessing(true);
+    try {
+      // Update order with selected payment method
+      await updateOrder(order.id, {
+        paymentMethod: selectedMethod as FirebasePaymentMethod,
+        status: "reserved",
+      });
+      
+      // Build payment result based on method
+      const result: PaymentResult = {
+        success: true,
+        paymentMethod: selectedMethod,
+        amount: order.totalAmount,
+        vendorPhone: invoice?.vendorPhone,
+      };
+      
+      // Generate payment instructions based on method
+      if (selectedMethod === "wave") {
+        result.instructions = "Envoyez le montant au numéro du vendeur via Wave";
+        result.deepLink = `wave://send?phone=${invoice?.vendorPhone}&amount=${order.totalAmount}`;
+      } else if (selectedMethod === "orange_money") {
+        result.instructions = "Envoyez le montant via Orange Money";
+        result.ussdCode = `#144*1*${invoice?.vendorPhone?.replace(/\D/g, "")}*${order.totalAmount}#`;
+      } else if (selectedMethod === "cash") {
+        result.instructions = "Contactez le vendeur pour organiser le paiement en espèces";
+      } else if (selectedMethod === "card") {
+        result.instructions = "Le paiement par carte sera disponible bientôt";
       }
-    },
-    onError: (error: Error) => {
-      toast({ title: "Erreur de paiement", description: error.message, variant: "destructive" });
-    },
-  });
+      
+      setPaymentResult(result);
+      
+      // Try to open the deep link if available
+      if (result.deepLink) {
+        window.location.href = result.deepLink;
+      }
+      
+      setWaitingPayment(true);
+    } catch (err) {
+      toast({ 
+        title: "Erreur", 
+        description: "Échec de l'initialisation du paiement", 
+        variant: "destructive" 
+      });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
 
   const copyToClipboard = (text: string, label: string) => {
     navigator.clipboard.writeText(text).then(() => {
@@ -398,11 +470,11 @@ export default function Pay() {
                 <Button
                   className="w-full"
                   size="lg"
-                  onClick={() => payMutation.mutate()}
-                  disabled={payMutation.isPending}
+                  onClick={handlePayment}
+                  disabled={isProcessing}
                   data-testid="button-pay"
                 >
-                  {payMutation.isPending ? (
+                  {isProcessing ? (
                     <>
                       <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                       Traitement...

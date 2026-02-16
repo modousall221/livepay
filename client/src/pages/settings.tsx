@@ -30,7 +30,13 @@ import {
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  getVendorConfig,
+  updateVendorConfig,
+  createVendorConfig,
+  updateUserProfile,
+  type VendorConfig,
+} from "@/lib/firebase";
 
 // Settings locaux (localStorage)
 const SETTINGS_KEY = "livepay_vendor_settings";
@@ -67,49 +73,17 @@ function saveSettings(settings: VendorSettings): void {
   }
 }
 
-async function fetchVendorConfig() {
-  const response = await fetch("/api/vendor/config", { credentials: "include" });
-  if (!response.ok) throw new Error("Erreur chargement config");
-  return response.json();
-}
-
-async function updateVendorConfig(data: Record<string, any>) {
-  const response = await fetch("/api/vendor/config", {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    credentials: "include",
-    body: JSON.stringify(data),
-  });
-  if (!response.ok) throw new Error("Erreur mise à jour config");
-  return response.json();
-}
-
-async function updateProfile(data: {
-  firstName?: string;
-  lastName?: string;
-  businessName?: string;
-  phone?: string;
-}) {
-  const response = await fetch("/api/auth/profile", {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    credentials: "include",
-    body: JSON.stringify(data),
-  });
-  if (!response.ok) {
-    throw new Error("Erreur lors de la mise à jour du profil");
-  }
-  return response.json();
-}
-
 
 
 export default function Settings() {
   const { user, logout, isLoggingOut } = useAuth();
   const { toast } = useToast();
-  const queryClient = useQueryClient();
   const [settings, setSettings] = useState<VendorSettings>(loadSettings);
   const [hasChanges, setHasChanges] = useState(false);
+  const [vendorConfig, setVendorConfig] = useState<VendorConfig | null>(null);
+  const [isLoadingConfig, setIsLoadingConfig] = useState(true);
+  const [isSavingConfig, setIsSavingConfig] = useState(false);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
   
   // Config chatbot simplifié - juste le délai de paiement
   const [chatbotConfig, setChatbotConfig] = useState({
@@ -122,36 +96,6 @@ export default function Settings() {
     preferredPaymentMethod: "wave",
   });
 
-  // Fetch vendor config
-  const { data: vendorConfig } = useQuery({
-    queryKey: ["/api/vendor/config"],
-    queryFn: fetchVendorConfig,
-  });
-
-  // Charger config depuis API
-  useEffect(() => {
-    if (vendorConfig) {
-      setChatbotConfig({
-        reservationDurationMinutes: vendorConfig.reservationDurationMinutes || 10,
-      });
-      setMobileMoneyConfig({
-        mobileMoneyNumber: vendorConfig.mobileMoneyNumber || "",
-        preferredPaymentMethod: vendorConfig.preferredPaymentMethod || "wave",
-      });
-    }
-  }, [vendorConfig]);
-
-  const vendorConfigMutation = useMutation({
-    mutationFn: updateVendorConfig,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/vendor/config"] });
-      toast({ title: "Configuration enregistrée" });
-    },
-    onError: () => {
-      toast({ title: "Erreur", description: "Impossible de sauvegarder", variant: "destructive" });
-    },
-  });
-
   // Profile form state
   const [profileData, setProfileData] = useState({
     firstName: user?.firstName || "",
@@ -159,6 +103,34 @@ export default function Settings() {
     businessName: user?.businessName || "",
     phone: user?.phone || "",
   });
+
+  // Fetch vendor config from Firebase
+  useEffect(() => {
+    if (!user) return;
+    
+    const loadConfig = async () => {
+      try {
+        setIsLoadingConfig(true);
+        const config = await getVendorConfig(user.id);
+        if (config) {
+          setVendorConfig(config);
+          setChatbotConfig({
+            reservationDurationMinutes: config.reservationDurationMinutes || 10,
+          });
+          setMobileMoneyConfig({
+            mobileMoneyNumber: config.mobileMoneyNumber || "",
+            preferredPaymentMethod: config.preferredPaymentMethod || "wave",
+          });
+        }
+      } catch (error) {
+        console.error("Error loading vendor config:", error);
+      } finally {
+        setIsLoadingConfig(false);
+      }
+    };
+    
+    loadConfig();
+  }, [user]);
 
   useEffect(() => {
     if (user) {
@@ -170,17 +142,6 @@ export default function Settings() {
       });
     }
   }, [user]);
-
-  const profileMutation = useMutation({
-    mutationFn: updateProfile,
-    onSuccess: (updatedUser) => {
-      queryClient.setQueryData(["/api/auth/user"], updatedUser);
-      toast({ title: "Profil mis à jour" });
-    },
-    onError: () => {
-      toast({ title: "Erreur", description: "Impossible de mettre à jour le profil", variant: "destructive" });
-    },
-  });
 
   const initials = user
     ? `${(user.firstName || "")[0] || ""}${(user.lastName || "")[0] || ""}`.toUpperCase() || "U"
@@ -200,21 +161,87 @@ export default function Settings() {
     toast({ title: "Paramètres enregistrés" });
   };
 
-  const handleProfileSave = (e: React.FormEvent) => {
+  const handleProfileSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!user) return;
     if (!profileData.phone) {
       toast({ title: "Erreur", description: "Le numéro de téléphone est obligatoire", variant: "destructive" });
       return;
     }
-    profileMutation.mutate(profileData);
+    setIsSavingProfile(true);
+    try {
+      await updateUserProfile(user.id, profileData);
+      toast({ title: "Profil mis à jour" });
+    } catch (error) {
+      toast({ title: "Erreur", description: "Impossible de mettre à jour le profil", variant: "destructive" });
+    } finally {
+      setIsSavingProfile(false);
+    }
   };
 
-  const handleChatbotSave = () => {
-    vendorConfigMutation.mutate(chatbotConfig);
+  const handleChatbotSave = async () => {
+    if (!user) return;
+    setIsSavingConfig(true);
+    try {
+      if (vendorConfig) {
+        await updateVendorConfig(vendorConfig.id, chatbotConfig);
+      } else {
+        const newConfig = await createVendorConfig({
+          vendorId: user.id,
+          businessName: user.businessName || "Ma Boutique",
+          ...chatbotConfig,
+          mobileMoneyNumber: mobileMoneyConfig.mobileMoneyNumber,
+          preferredPaymentMethod: mobileMoneyConfig.preferredPaymentMethod,
+          status: "active",
+          liveMode: false,
+          autoReplyEnabled: true,
+          segment: "starter",
+          allowQuantitySelection: true,
+          requireDeliveryAddress: false,
+          autoReminderEnabled: true,
+          upsellEnabled: false,
+          minTrustScoreRequired: 0,
+        });
+        setVendorConfig(newConfig);
+      }
+      toast({ title: "Configuration enregistrée" });
+    } catch (error) {
+      toast({ title: "Erreur", description: "Impossible de sauvegarder", variant: "destructive" });
+    } finally {
+      setIsSavingConfig(false);
+    }
   };
 
-  const handleMobileMoneyConfigSave = () => {
-    vendorConfigMutation.mutate(mobileMoneyConfig);
+  const handleMobileMoneyConfigSave = async () => {
+    if (!user) return;
+    setIsSavingConfig(true);
+    try {
+      if (vendorConfig) {
+        await updateVendorConfig(vendorConfig.id, mobileMoneyConfig);
+      } else {
+        const newConfig = await createVendorConfig({
+          vendorId: user.id,
+          businessName: user.businessName || "Ma Boutique",
+          ...mobileMoneyConfig,
+          reservationDurationMinutes: chatbotConfig.reservationDurationMinutes,
+          status: "active",
+          liveMode: false,
+          autoReplyEnabled: true,
+          segment: "starter",
+          allowQuantitySelection: true,
+          requireDeliveryAddress: false,
+          autoReminderEnabled: true,
+          upsellEnabled: false,
+          minTrustScoreRequired: 0,
+        });
+        setVendorConfig(newConfig);
+      }
+      toast({ title: "Configuration enregistrée" });
+    } catch (error) {
+      toast({ title: "Erreur", description: "Impossible de sauvegarder", variant: "destructive" });
+    } finally {
+      setIsSavingConfig(false);
+    }
   };
 
   return (
@@ -300,8 +327,8 @@ export default function Settings() {
             </p>
           </div>
 
-          <Button type="submit" className="w-full" disabled={profileMutation.isPending}>
-            {profileMutation.isPending ? (
+          <Button type="submit" className="w-full" disabled={isSavingProfile}>
+            {isSavingProfile ? (
               <>
                 <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                 Enregistrement...
@@ -394,8 +421,8 @@ export default function Settings() {
           </div>
         </div>
 
-        <Button onClick={handleMobileMoneyConfigSave} className="w-full" disabled={vendorConfigMutation.isPending}>
-          {vendorConfigMutation.isPending ? (
+        <Button onClick={handleMobileMoneyConfigSave} className="w-full" disabled={isSavingConfig}>
+          {isSavingConfig ? (
             <Loader2 className="w-4 h-4 mr-2 animate-spin" />
           ) : (
             <Save className="w-4 h-4 mr-2" />
@@ -467,8 +494,8 @@ export default function Settings() {
           </div>
         </div>
 
-        <Button onClick={handleChatbotSave} className="w-full" disabled={vendorConfigMutation.isPending}>
-          {vendorConfigMutation.isPending ? (
+        <Button onClick={handleChatbotSave} className="w-full" disabled={isSavingConfig}>
+          {isSavingConfig ? (
             <Loader2 className="w-4 h-4 mr-2 animate-spin" />
           ) : (
             <Save className="w-4 h-4 mr-2" />

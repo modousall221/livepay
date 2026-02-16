@@ -17,7 +17,7 @@ import Dashboard from "@/pages/dashboard";
 import Products from "@/pages/products";
 import Orders from "@/pages/orders";
 import Settings from "@/pages/settings";
-import Admin from "@/pages/admin";
+import Admin from "@/pages/admin-upcoming";
 import Pay from "@/pages/pay";
 import ProductPublic from "@/pages/product-public";
 import { InstallPrompt } from "@/components/install-prompt";

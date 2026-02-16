@@ -1,6 +1,4 @@
-import { useState } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
+import { useState, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
@@ -21,7 +19,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { MessageCircle, Send, Package, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import type { Product } from "@shared/schema";
+import { useAuth } from "@/hooks/use-auth";
+import { getProducts, type Product } from "@/lib/firebase";
 
 interface InitiateChatDialogProps {
   trigger?: React.ReactNode;
@@ -38,36 +37,19 @@ export function InitiateChatDialog({
   const [phone, setPhone] = useState(defaultPhone);
   const [selectedProductId, setSelectedProductId] = useState<string>(defaultProductId || "");
   const [customMessage, setCustomMessage] = useState("");
+  const [isSending, setIsSending] = useState(false);
+  const [products, setProducts] = useState<Product[]>([]);
   const { toast } = useToast();
+  const { user } = useAuth();
 
-  const { data: products } = useQuery<Product[]>({
-    queryKey: ["/api/products"],
-    enabled: open,
-  });
+  // Load products from Firebase when dialog opens
+  useEffect(() => {
+    if (open && user) {
+      getProducts(user.id).then(setProducts).catch(console.error);
+    }
+  }, [open, user]);
 
-  const activeProducts = products?.filter((p) => p.active) || [];
-
-  const initiateChatMutation = useMutation({
-    mutationFn: (data: { clientPhone: string; productId?: string; message?: string }) =>
-      apiRequest("POST", "/api/vendor/initiate-chat", data),
-    onSuccess: () => {
-      toast({
-        title: "Message envoyé !",
-        description: "Le client a reçu votre message sur WhatsApp",
-      });
-      setOpen(false);
-      setPhone("");
-      setSelectedProductId("");
-      setCustomMessage("");
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "Erreur d'envoi",
-        description: error.message,
-        variant: "destructive",
-      });
-    },
-  });
+  const activeProducts = products.filter((p) => p.active);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -83,11 +65,31 @@ export function InitiateChatDialog({
       return;
     }
 
-    initiateChatMutation.mutate({
-      clientPhone: cleanPhone,
-      productId: selectedProductId || undefined,
-      message: customMessage || undefined,
+    setIsSending(true);
+
+    // Build message
+    let message = customMessage;
+    if (!message && selectedProduct) {
+      message = `🛍️ *${selectedProduct.name}*\n💰 ${selectedProduct.price.toLocaleString("fr-FR")} FCFA\n\n📱 Pour commander, envoyez le code: *${selectedProduct.keyword}*`;
+    }
+    if (!message) {
+      message = "Bonjour ! Comment puis-je vous aider ?";
+    }
+
+    // Open WhatsApp Web/App directly
+    const whatsappUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`;
+    window.open(whatsappUrl, "_blank");
+
+    toast({
+      title: "WhatsApp ouvert",
+      description: "Envoyez votre message via WhatsApp",
     });
+    
+    setOpen(false);
+    setPhone("");
+    setSelectedProductId("");
+    setCustomMessage("");
+    setIsSending(false);
   };
 
   const selectedProduct = activeProducts.find((p) => p.id === selectedProductId);
@@ -187,9 +189,9 @@ export function InitiateChatDialog({
           <Button
             type="submit"
             className="w-full bg-green-600 hover:bg-green-700"
-            disabled={initiateChatMutation.isPending || !phone}
+            disabled={isSending || !phone}
           >
-            {initiateChatMutation.isPending ? (
+            {isSending ? (
               <>
                 <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                 Envoi en cours...

@@ -1,29 +1,25 @@
-import { useQuery } from "@tanstack/react-query";
 import { useParams } from "wouter";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { MessageCircle, ShoppingBag, Share2, Copy, Check, Send, Camera, Video, Facebook,  Download } from "lucide-react";
+import { MessageCircle, ShoppingBag, Share2, Copy, Check, Send, Camera, Video, Facebook, Download } from "lucide-react";
 import { useState, useEffect } from "react";
+import { getProductByShareCode, getUserProfile, getVendorConfig, type Product, type UserProfile, type VendorConfig } from "@/lib/firebase";
 
-interface PublicProduct {
-  id: string;
-  name: string;
-  keyword: string;
-  shareCode: string;
-  price: number;
-  description: string | null;
-  imageUrl: string | null;
-  stock: number;
-  vendorName: string;
-  whatsappNumber: string | null;
+interface PublicProductData {
+  product: Product;
+  vendor: UserProfile | null;
+  config: VendorConfig | null;
 }
 
 export default function ProductPublic() {
   const params = useParams<{ code: string }>();
   const [copied, setCopied] = useState(false);
   const [isInstagramBrowser, setIsInstagramBrowser] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+  const [data, setData] = useState<PublicProductData | null>(null);
 
   useEffect(() => {
     // Detect Instagram/TikTok in-app browser
@@ -31,10 +27,38 @@ export default function ProductPublic() {
     setIsInstagramBrowser(ua.includes('instagram') || ua.includes('tiktok'));
   }, []);
 
-  const { data: product, isLoading, error } = useQuery<PublicProduct>({
-    queryKey: [`/api/public/product/${params.code}`],
-    enabled: !!params.code,
-  });
+  useEffect(() => {
+    if (!params.code) return;
+    
+    const loadProduct = async () => {
+      try {
+        setIsLoading(true);
+        const product = await getProductByShareCode(params.code);
+        if (!product) {
+          setError(new Error("Product not found"));
+          return;
+        }
+        
+        // Load vendor info
+        const [vendor, config] = await Promise.all([
+          getUserProfile(product.vendorId),
+          getVendorConfig(product.vendorId),
+        ]);
+        
+        setData({ product, vendor, config });
+      } catch (err) {
+        setError(err as Error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    loadProduct();
+  }, [params.code]);
+
+  const product = data?.product;
+  const vendorName = data?.vendor?.businessName || data?.vendor?.firstName || "Vendeur";
+  const whatsappNumber = data?.vendor?.phone || data?.config?.mobileMoneyNumber;
 
   const handleCopyKeyword = async () => {
     if (product?.keyword) {
@@ -45,9 +69,10 @@ export default function ProductPublic() {
   };
 
   const handleWhatsAppOrder = () => {
-    if (product?.whatsappNumber && product?.keyword) {
+    if (whatsappNumber && product?.keyword) {
       const message = encodeURIComponent(product.keyword);
-      const url = `https://wa.me/${product.whatsappNumber}?text=${message}`;
+      const cleanPhone = whatsappNumber.replace(/[^0-9]/g, "");
+      const url = `https://wa.me/${cleanPhone}?text=${message}`;
       
       // For in-app browsers, try to open in external browser
       if (isInstagramBrowser) {
@@ -167,7 +192,7 @@ export default function ProductPublic() {
       <div className="max-w-md mx-auto mb-4">
         <div className="flex items-center justify-between">
           <span className="text-sm font-medium text-green-700 dark:text-green-400">
-            {product.vendorName}
+            {vendorName}
           </span>
           <Button variant="ghost" size="icon" onClick={handleShare}>
             <Share2 className="w-4 h-4" />

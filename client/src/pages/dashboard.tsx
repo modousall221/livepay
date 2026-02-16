@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -18,45 +17,19 @@ import {
 } from "lucide-react";
 import { Link } from "wouter";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 import { OnboardingChecklist, WelcomeModal } from "@/components/onboarding";
 import { QuickActions } from "@/components/quick-actions";
 import { StatsSkeleton } from "@/components/empty-state";
-
-interface VendorConfig {
-  id: string;
-  vendorId: string;
-  businessName: string;
-  liveMode: boolean;
-  reservationDurationMinutes: number;
-  autoReplyEnabled: boolean;
-  welcomeMessage: string | null;
-}
-
-interface Order {
-  id: string;
-  clientPhone: string;
-  clientName: string | null;
-  productName: string;
-  quantity: number;
-  totalAmount: number;
-  status: "pending" | "reserved" | "paid" | "expired" | "cancelled";
-  createdAt: string;
-}
-
-interface Product {
-  id: string;
-  keyword: string;
-  name: string;
-  price: number;
-  originalPrice?: number | null;
-  stock: number;
-  reservedStock: number;
-  active: boolean;
-  featured?: boolean | null;
-  imageUrl?: string | null;
-  category?: string | null;
-  shareCode?: string | null;
-}
+import {
+  getVendorConfig,
+  updateVendorConfig,
+  getProducts,
+  getOrders,
+  type VendorConfig,
+  type Product,
+  type Order,
+} from "@/lib/firebase";
 
 interface OrderStats {
   pending: number;
@@ -66,23 +39,16 @@ interface OrderStats {
   totalRevenue: number;
 }
 
-async function apiRequest(method: string, url: string, data?: any) {
-  const res = await fetch(url, {
-    method,
-    headers: data ? { "Content-Type": "application/json" } : undefined,
-    body: data ? JSON.stringify(data) : undefined,
-    credentials: "include",
-  });
-  if (!res.ok) {
-    const error = await res.json().catch(() => ({ message: "Erreur réseau" }));
-    throw new Error(error.message || "Erreur");
-  }
-  return res.json();
-}
-
 export default function Dashboard() {
   const { toast } = useToast();
-  const queryClient = useQueryClient();
+  const { user } = useAuth();
+  
+  // Data state
+  const [config, setConfig] = useState<VendorConfig | null>(null);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isTogglingLive, setIsTogglingLive] = useState(false);
   
   // Welcome modal state for new users
   const [showWelcome, setShowWelcome] = useState(false);
@@ -96,53 +62,74 @@ export default function Dashboard() {
     }
   }, []);
   
+  // Load data from Firebase
+  useEffect(() => {
+    if (!user) return;
+    
+    const loadData = async () => {
+      try {
+        setIsLoading(true);
+        const [configData, productsData, ordersData] = await Promise.all([
+          getVendorConfig(user.id),
+          getProducts(user.id),
+          getOrders(user.id),
+        ]);
+        setConfig(configData);
+        setProducts(productsData);
+        setOrders(ordersData);
+      } catch (error) {
+        console.error("Error loading dashboard data:", error);
+        toast({ title: "Erreur", description: "Impossible de charger les données", variant: "destructive" });
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    loadData();
+  }, [user, toast]);
+  
   const dismissWelcome = () => {
     localStorage.setItem("livepay_visited", "true");
     setShowWelcome(false);
   };
 
-  const { data: config, isLoading: loadingConfig } = useQuery<VendorConfig>({
-    queryKey: ["/api/vendor/config"],
-  });
-
-  const { data: stats, isLoading: loadingStats } = useQuery<OrderStats>({
-    queryKey: ["/api/orders/stats"],
-  });
-
-  const { data: orders, isLoading: loadingOrders } = useQuery<Order[]>({
-    queryKey: ["/api/orders"],
-  });
-
-  const { data: products, isLoading: loadingProducts } = useQuery<Product[]>({
-    queryKey: ["/api/products"],
-  });
-
-  const toggleLiveMode = useMutation({
-    mutationFn: (liveMode: boolean) => apiRequest("POST", "/api/vendor/live-mode", { liveMode }),
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/vendor/config"] });
+  // Toggle live mode
+  const toggleLiveMode = async (liveMode: boolean) => {
+    if (!config) return;
+    setIsTogglingLive(true);
+    try {
+      await updateVendorConfig(config.id, { liveMode });
+      setConfig(prev => prev ? { ...prev, liveMode } : null);
       toast({
-        title: data.liveMode ? "Mode Live activé" : "Mode Live désactivé",
-        description: data.liveMode 
+        title: liveMode ? "Mode Live activé" : "Mode Live désactivé",
+        description: liveMode 
           ? "Le chatbot WhatsApp accepte maintenant les commandes" 
           : "Le chatbot est en pause",
       });
-    },
-    onError: () => {
+    } catch (error) {
       toast({ title: "Erreur", description: "Impossible de changer le mode", variant: "destructive" });
-    },
-  });
+    } finally {
+      setIsTogglingLive(false);
+    }
+  };
 
-  const isLoading = loadingConfig || loadingStats || loadingOrders || loadingProducts;
+  // Calculate stats from orders
+  const stats: OrderStats = {
+    pending: orders.filter(o => o.status === "pending").length,
+    reserved: orders.filter(o => o.status === "reserved").length,
+    paid: orders.filter(o => o.status === "paid").length,
+    expired: orders.filter(o => o.status === "expired").length,
+    totalRevenue: orders.filter(o => o.status === "paid").reduce((sum, o) => sum + o.totalAmount, 0),
+  };
 
   const formatPrice = (amount: number) => {
     return new Intl.NumberFormat("fr-FR").format(amount) + " FCFA";
   };
 
-  const recentOrders = orders?.slice(0, 5) || [];
+  const recentOrders = orders.slice(0, 5);
   
   // Onboarding state calculations
-  const hasProducts = (products?.length || 0) > 0;
+  const hasProducts = products.length > 0;
   const hasPhone = true; // TODO: Check from config when available
   const hasLiveMode = config?.liveMode || false;
 
@@ -164,7 +151,7 @@ export default function Dashboard() {
       {/* Quick Actions FAB */}
       <QuickActions 
         isLiveMode={config?.liveMode || false}
-        onToggleLiveMode={() => toggleLiveMode.mutate(!config?.liveMode)}
+        onToggleLiveMode={() => toggleLiveMode(!config?.liveMode)}
       />
       {/* Header */}
       <div>
@@ -206,8 +193,8 @@ export default function Dashboard() {
               <span className="text-sm font-medium">{config?.liveMode ? "ON" : "OFF"}</span>
               <Switch
                 checked={config?.liveMode || false}
-                onCheckedChange={(checked) => toggleLiveMode.mutate(checked)}
-                disabled={toggleLiveMode.isPending}
+                onCheckedChange={(checked) => toggleLiveMode(checked)}
+                disabled={isTogglingLive}
                 className="scale-125"
               />
             </div>
@@ -296,10 +283,13 @@ export default function Dashboard() {
             ) : (
               <ScrollArea className="h-[280px]">
                 <div className="space-y-3">
-                  {recentOrders.map((order) => (
+                  {recentOrders.map((order) => {
+                    const product = products.find(p => p.id === order.productId);
+                    const productName = product?.name || "Produit";
+                    return (
                     <div key={order.id} className="flex items-center justify-between p-3 rounded-lg border">
                       <div>
-                        <p className="font-medium text-sm">{order.productName} x{order.quantity}</p>
+                        <p className="font-medium text-sm">{productName} x{order.quantity}</p>
                         <p className="text-xs text-muted-foreground">{order.clientName || order.clientPhone}</p>
                       </div>
                       <div className="text-right">
@@ -312,7 +302,8 @@ export default function Dashboard() {
                         </Badge>
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </ScrollArea>
             )}

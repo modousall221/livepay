@@ -251,6 +251,17 @@ export async function getProducts(vendorId: string): Promise<Product[]> {
   })) as Product[];
 }
 
+export async function getProduct(productId: string): Promise<Product | null> {
+  const docRef = doc(db, "products", productId);
+  const snap = await getDoc(docRef);
+  if (!snap.exists()) return null;
+  return {
+    ...snap.data(),
+    id: snap.id,
+    createdAt: snap.data().createdAt?.toDate() || new Date(),
+  } as Product;
+}
+
 export async function getProductByShareCode(code: string): Promise<Product | null> {
   const q = query(collection(db, "products"), where("shareCode", "==", code));
   const snap = await getDocs(q);
@@ -471,6 +482,36 @@ export async function updateInvoice(invoiceId: string, data: Partial<Invoice>): 
   if (data.dueDate) updateData.dueDate = Timestamp.fromDate(data.dueDate);
   if (data.paidAt) updateData.paidAt = Timestamp.fromDate(data.paidAt);
   await updateDoc(doc(db, "invoices", invoiceId), updateData);
+}
+
+export async function getInvoiceById(invoiceId: string): Promise<Invoice | null> {
+  const docRef = doc(db, "invoices", invoiceId);
+  const snap = await getDoc(docRef);
+  if (!snap.exists()) return null;
+  const data = snap.data();
+  return {
+    ...data,
+    id: snap.id,
+    createdAt: data.createdAt?.toDate() || new Date(),
+    dueDate: data.dueDate?.toDate(),
+    paidAt: data.paidAt?.toDate(),
+  } as Invoice;
+}
+
+export async function getOrderByToken(token: string): Promise<Order | null> {
+  // Token can be the order ID directly
+  const docRef = doc(db, "orders", token);
+  const snap = await getDoc(docRef);
+  if (!snap.exists()) return null;
+  const data = snap.data();
+  return {
+    ...data,
+    id: snap.id,
+    createdAt: data.createdAt?.toDate() || new Date(),
+    updatedAt: data.updatedAt?.toDate() || new Date(),
+    reservedUntil: data.reservedUntil?.toDate(),
+    paidAt: data.paidAt?.toDate(),
+  } as Order;
 }
 
 // ========== FILE UPLOAD ==========

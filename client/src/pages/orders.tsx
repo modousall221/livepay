@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -6,21 +6,9 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Package, Phone, Clock, CheckCircle, XCircle, AlertCircle, MessageCircle } from "lucide-react";
 import { InitiateChatDialog } from "@/components/initiate-chat-dialog";
-
-interface Order {
-  id: string;
-  clientPhone: string;
-  clientName: string | null;
-  productName: string;
-  quantity: number;
-  unitPrice: number;
-  totalAmount: number;
-  status: "pending" | "reserved" | "paid" | "expired" | "cancelled";
-  paymentMethod: string | null;
-  createdAt: string;
-  expiresAt: string;
-  paidAt: string | null;
-}
+import { useAuth } from "@/hooks/use-auth";
+import { useToast } from "@/hooks/use-toast";
+import { getOrders, getProducts, type Order, type Product } from "@/lib/firebase";
 
 const statusConfig = {
   pending: { label: "En attente", color: "bg-yellow-500", icon: Clock },
@@ -31,19 +19,48 @@ const statusConfig = {
 };
 
 export default function Orders() {
-  const { data: orders, isLoading } = useQuery<Order[]>({
-    queryKey: ["/api/orders"],
-  });
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const { data: stats } = useQuery<{
-    pending: number;
-    reserved: number;
-    paid: number;
-    expired: number;
-    totalRevenue: number;
-  }>({
-    queryKey: ["/api/orders/stats"],
-  });
+  useEffect(() => {
+    if (!user) return;
+    
+    const loadData = async () => {
+      try {
+        setIsLoading(true);
+        const [ordersData, productsData] = await Promise.all([
+          getOrders(user.id),
+          getProducts(user.id),
+        ]);
+        setOrders(ordersData);
+        setProducts(productsData);
+      } catch (error) {
+        console.error("Error loading orders:", error);
+        toast({ title: "Erreur", description: "Impossible de charger les commandes", variant: "destructive" });
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    loadData();
+  }, [user, toast]);
+
+  // Calculate stats from orders
+  const stats = {
+    pending: orders.filter(o => o.status === "pending").length,
+    reserved: orders.filter(o => o.status === "reserved").length,
+    paid: orders.filter(o => o.status === "paid").length,
+    expired: orders.filter(o => o.status === "expired").length,
+    totalRevenue: orders.filter(o => o.status === "paid").reduce((sum, o) => sum + o.totalAmount, 0),
+  };
+
+  const getProductName = (productId: string) => {
+    const product = products.find(p => p.id === productId);
+    return product?.name || "Produit";
+  };
 
   if (isLoading) {
     return (
@@ -63,8 +80,8 @@ export default function Orders() {
     return new Intl.NumberFormat("fr-FR").format(amount) + " FCFA";
   };
 
-  const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleString("fr-FR", {
+  const formatDate = (date: Date) => {
+    return date.toLocaleString("fr-FR", {
       day: "2-digit",
       month: "short",
       hour: "2-digit",
@@ -96,7 +113,7 @@ export default function Orders() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">En attente</p>
-                <p className="text-2xl font-bold text-blue-600">{stats?.reserved || 0}</p>
+                <p className="text-2xl font-bold text-blue-600">{stats.reserved}</p>
               </div>
               <AlertCircle className="h-8 w-8 text-blue-500 opacity-50" />
             </div>
@@ -107,7 +124,7 @@ export default function Orders() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Payées</p>
-                <p className="text-2xl font-bold text-green-600">{stats?.paid || 0}</p>
+                <p className="text-2xl font-bold text-green-600">{stats.paid}</p>
               </div>
               <CheckCircle className="h-8 w-8 text-green-500 opacity-50" />
             </div>
@@ -118,7 +135,7 @@ export default function Orders() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Expirées</p>
-                <p className="text-2xl font-bold text-gray-600">{stats?.expired || 0}</p>
+                <p className="text-2xl font-bold text-gray-600">{stats.expired}</p>
               </div>
               <XCircle className="h-8 w-8 text-gray-400 opacity-50" />
             </div>
@@ -130,7 +147,7 @@ export default function Orders() {
               <div>
                 <p className="text-sm text-muted-foreground">Revenu total</p>
                 <p className="text-xl font-bold text-green-600">
-                  {formatPrice(stats?.totalRevenue || 0)}
+                  {formatPrice(stats.totalRevenue)}
                 </p>
               </div>
               <Package className="h-8 w-8 text-green-500 opacity-50" />
@@ -145,7 +162,7 @@ export default function Orders() {
           <CardTitle className="text-lg">Historique des commandes</CardTitle>
         </CardHeader>
         <CardContent>
-          {(!orders || orders.length === 0) ? (
+          {orders.length === 0 ? (
             <div className="text-center py-12 text-muted-foreground">
               <Package className="h-12 w-12 mx-auto mb-4 opacity-50" />
               <p>Aucune commande pour le moment</p>
@@ -157,6 +174,7 @@ export default function Orders() {
                 {orders.map((order) => {
                   const config = statusConfig[order.status];
                   const StatusIcon = config.icon;
+                  const productName = getProductName(order.productId);
                   return (
                     <div
                       key={order.id}
@@ -168,7 +186,7 @@ export default function Orders() {
                         </div>
                         <div>
                           <div className="flex items-center gap-2">
-                            <span className="font-medium">{order.productName}</span>
+                            <span className="font-medium">{productName}</span>
                             <Badge variant="outline">x{order.quantity}</Badge>
                           </div>
                           <div className="flex items-center gap-2 text-sm text-muted-foreground mt-1">

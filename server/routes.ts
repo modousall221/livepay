@@ -14,6 +14,11 @@ export async function registerRoutes(
   await setupAuth(app);
   registerAuthRoutes(app);
 
+  // Health check endpoint for Railway/deployment monitoring
+  app.get("/api/health", (_req, res) => {
+    res.json({ status: "ok", timestamp: new Date().toISOString() });
+  });
+
   app.get("/api/products", isAuthenticated, async (req: any, res) => {
     try {
       const vendorId = (req.user as any).id;

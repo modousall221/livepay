@@ -6,6 +6,41 @@ import { insertProductSchema, insertLiveSessionSchema, insertInvoiceSchema } fro
 import { getPaymentProvider, getAvailableProviders } from "./payment-providers";
 import { whatsappService } from "./whatsapp/service";
 import type { WhatsAppWebhookPayload } from "./whatsapp/types";
+import multer from "multer";
+import path from "path";
+import fs from "fs";
+
+// Configure multer for image uploads
+const uploadDir = path.join(process.cwd(), "uploads");
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+
+const imageStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    cb(null, uploadDir);
+  },
+  filename: (_req, file, cb) => {
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    const ext = path.extname(file.originalname);
+    cb(null, `product-${uniqueSuffix}${ext}`);
+  },
+});
+
+const upload = multer({
+  storage: imageStorage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB max
+  fileFilter: (_req, file, cb) => {
+    const allowedTypes = /jpeg|jpg|png|gif|webp/;
+    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+    const mimetype = allowedTypes.test(file.mimetype);
+    if (extname && mimetype) {
+      cb(null, true);
+    } else {
+      cb(new Error("Only images are allowed (jpeg, jpg, png, gif, webp)"));
+    }
+  },
+});
 
 // Helper to get display phone number from WhatsApp Business API
 async function getWhatsAppDisplayPhone(phoneNumberId: string, accessToken?: string | null): Promise<string | null> {
@@ -35,6 +70,25 @@ export async function registerRoutes(
   // Health check endpoint for Railway/deployment monitoring
   app.get("/api/health", (_req, res) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
+  });
+
+  // Serve uploaded images
+  app.use("/uploads", (await import("express")).default.static(uploadDir));
+
+  // Image upload endpoint
+  app.post("/api/upload", isAuthenticated, upload.single("image"), (req: any, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ message: "Aucune image fournie" });
+      }
+      const appHost = process.env.APP_HOST || 
+        (process.env.NODE_ENV === "production" ? "https://livepay.tech" : "http://localhost:5000");
+      const imageUrl = `${appHost}/uploads/${req.file.filename}`;
+      res.json({ url: imageUrl, filename: req.file.filename });
+    } catch (error: any) {
+      console.error("Upload error:", error);
+      res.status(500).json({ message: error.message || "Erreur d'upload" });
+    }
   });
 
   // ========== PUBLIC PRODUCT SHARING ROUTES ==========

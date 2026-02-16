@@ -18,10 +18,10 @@ import {
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { insertProductSchema, type Product, type InsertProduct } from "@shared/schema";
-import { Plus, Package, Trash2, Pencil, Share2, QrCode, Star, ImageIcon, Video, Tag, Percent } from "lucide-react";
+import { Plus, Package, Trash2, Pencil, Share2, QrCode, Star, ImageIcon, Video, Tag, Percent, Upload, X, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { isUnauthorizedError } from "@/lib/auth-utils";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { ProductShareDialog } from "@/components/product-share-dialog";
 import {
   Select,
@@ -48,10 +48,56 @@ export default function Products() {
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { data: products, isLoading } = useQuery<Product[]>({
     queryKey: ["/api/products"],
   });
+
+  // Image upload handler
+  const handleImageUpload = async (file: File) => {
+    if (!file) return;
+    
+    // Validate file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      toast({ title: "Erreur", description: "Image trop volumineuse (max 5MB)", variant: "destructive" });
+      return;
+    }
+    
+    // Validate file type
+    const validTypes = ["image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp"];
+    if (!validTypes.includes(file.type)) {
+      toast({ title: "Erreur", description: "Format non supporté. Utilisez JPG, PNG, GIF ou WebP", variant: "destructive" });
+      return;
+    }
+    
+    setIsUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("image", file);
+      
+      const response = await fetch("/api/upload", {
+        method: "POST",
+        credentials: "include",
+        body: formData,
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || "Erreur upload");
+      }
+      
+      const data = await response.json();
+      form.setValue("imageUrl", data.url);
+      toast({ title: "Image uploadée !" });
+    } catch (error: any) {
+      console.error("Upload error:", error);
+      toast({ title: "Erreur", description: error.message || "Impossible d'uploader l'image", variant: "destructive" });
+    } finally {
+      setIsUploading(false);
+    }
+  };
 
   const form = useForm<InsertProduct>({
     resolver: zodResolver(
@@ -317,30 +363,74 @@ export default function Products() {
                 </Select>
               </div>
 
-              {/* Image URL with preview */}
+              {/* Image Upload */}
               <div className="space-y-2">
-                <Label htmlFor="imageUrl" className="flex items-center gap-2">
+                <Label className="flex items-center gap-2">
                   <ImageIcon className="w-4 h-4" />
                   Image du produit
                 </Label>
-                <Input
-                  id="imageUrl"
-                  {...form.register("imageUrl")}
-                  placeholder="https://exemple.com/image.jpg"
+                
+                {/* Hidden file input */}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/jpeg,image/jpg,image/png,image/gif,image/webp"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handleImageUpload(file);
+                  }}
                 />
-                {form.watch("imageUrl") && (
-                  <div className="relative w-full h-32 bg-gray-100 rounded-lg overflow-hidden">
+                
+                {/* Preview or Upload Zone */}
+                {form.watch("imageUrl") ? (
+                  <div className="relative w-full h-40 bg-gray-100 rounded-lg overflow-hidden border-2 border-dashed border-gray-300">
                     <img
                       src={form.watch("imageUrl")}
                       alt="Aperçu"
                       className="w-full h-full object-cover"
-                      onError={(e) => { (e.target as HTMLImageElement).src = ""; }}
+                      onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
                     />
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      size="icon"
+                      className="absolute top-2 right-2"
+                      onClick={() => form.setValue("imageUrl", "")}
+                    >
+                      <X className="w-4 h-4" />
+                    </Button>
+                  </div>
+                ) : (
+                  <div
+                    onClick={() => fileInputRef.current?.click()}
+                    className="w-full h-40 border-2 border-dashed border-gray-300 rounded-lg flex flex-col items-center justify-center gap-2 cursor-pointer hover:border-primary hover:bg-gray-50 dark:hover:bg-gray-900 transition-colors"
+                  >
+                    {isUploading ? (
+                      <>
+                        <Loader2 className="w-8 h-8 text-primary animate-spin" />
+                        <span className="text-sm text-muted-foreground">Upload en cours...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="w-8 h-8 text-muted-foreground" />
+                        <span className="text-sm text-muted-foreground">Cliquez pour uploader</span>
+                        <span className="text-xs text-muted-foreground">JPG, PNG, GIF, WebP (max 5MB)</span>
+                      </>
+                    )}
                   </div>
                 )}
-                <p className="text-xs text-muted-foreground">
-                  Collez l'URL d'une image hébergée (Google Drive, Imgur, etc.)
-                </p>
+                
+                {/* URL Input as alternative */}
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">ou</span>
+                  <Input
+                    id="imageUrl"
+                    {...form.register("imageUrl")}
+                    placeholder="Coller une URL d'image..."
+                    className="text-sm"
+                  />
+                </div>
               </div>
 
               {/* Video URL */}
@@ -445,12 +535,13 @@ export default function Products() {
             return (
             <Card key={product.id} className={`overflow-hidden hover-elevate ${isLowStock ? "border-amber-300" : ""} ${product.featured ? "ring-2 ring-amber-400" : ""}`} data-testid={`card-product-${product.id}`}>
               {/* Image thumbnail */}
-              {product.imageUrl ? (
+              {product.imageUrl && product.imageUrl.trim() ? (
                 <div className="relative h-32 bg-gray-100">
                   <img
                     src={product.imageUrl}
                     alt={product.name}
                     className="w-full h-full object-cover"
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
                   />
                   {product.featured && (
                     <div className="absolute top-2 left-2">
@@ -460,7 +551,7 @@ export default function Products() {
                       </Badge>
                     </div>
                   )}
-                  {product.videoUrl && (
+                  {product.videoUrl && product.videoUrl.trim() && (
                     <div className="absolute top-2 right-2">
                       <Badge variant="secondary">
                         <Video className="w-3 h-3 mr-1" />

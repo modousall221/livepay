@@ -55,7 +55,11 @@ import {
   ExternalLink,
   Terminal,
   Radio,
-  AlertTriangle
+  AlertTriangle,
+  FileText,
+  ChevronDown,
+  ChevronUp,
+  RotateCcw
 } from "lucide-react";
 
 // Types
@@ -83,6 +87,7 @@ interface VendorConfig {
   reservationDurationMinutes: number;
   autoReplyEnabled: boolean;
   autoReminderEnabled: boolean;
+  messageTemplates: string | null;
   createdAt: string;
 }
 
@@ -221,6 +226,7 @@ function VendorConfigDialog({ vendor, onClose }: { vendor: Vendor; onClose: () =
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [showToken, setShowToken] = useState(false);
+  const [activeTab, setActiveTab] = useState<"api" | "templates">("api");
   const [testResult, setTestResult] = useState<{ success: boolean; message: string; phoneNumber?: string } | null>(null);
   const [config, setConfig] = useState<Partial<VendorConfig>>({
     whatsappPhoneNumberId: "",
@@ -232,6 +238,80 @@ function VendorConfigDialog({ vendor, onClose }: { vendor: Vendor; onClose: () =
     reservationDurationMinutes: 10,
     segment: "live_seller",
   });
+
+  // Message templates state
+  const [expandedTemplate, setExpandedTemplate] = useState<string | null>(null);
+  const [previewTemplate, setPreviewTemplate] = useState<string | null>(null);
+  const defaultTemplates = {
+    paymentLink: {
+      header: "🧾 Facture LivePay",
+      body: `Bonjour {{clientName}} !
+
+*Produit:* {{productName}}
+*Montant:* {{amount}} FCFA
+
+⏱️ Ce lien expire dans {{expiresIn}} minutes
+
+👇 Cliquez pour payer en toute sécurité:
+{{paymentUrl}}`,
+      footer: "Paiement sécurisé via Wave, Orange Money ou Carte bancaire"
+    },
+    paymentConfirmed: {
+      header: "✅ Paiement confirmé !",
+      body: `Merci {{clientName}} !
+
+Votre paiement de *{{amount}} FCFA* pour "{{productName}}" a été reçu.
+
+🧾 Référence: #{{reference}}
+
+Le vendeur a été notifié et préparera votre commande.`,
+      footer: "Merci d'avoir utilisé LivePay ! 🎉"
+    },
+    paymentReminder: {
+      header: "⏰ Rappel de paiement",
+      body: `Bonjour {{clientName}},
+
+Votre facture pour "{{productName}}" ({{amount}} FCFA) est toujours en attente.
+
+Il vous reste {{remainingMinutes}} minutes pour finaliser le paiement:
+{{paymentUrl}}`,
+      footer: "Après expiration, le produit sera remis en vente"
+    },
+    orderExpired: {
+      header: "⌛ Commande expirée",
+      body: `Bonjour {{clientName}},
+
+Votre réservation pour "{{productName}}" a expiré car le paiement n'a pas été effectué dans les délais.
+
+Vous pouvez repasser commande à tout moment.`,
+      footer: "Tapez 'catalogue' pour voir nos produits disponibles"
+    }
+  };
+  const [messageTemplates, setMessageTemplates] = useState(defaultTemplates);
+  const [templatesHaveChanges, setTemplatesHaveChanges] = useState(false);
+
+  const templateLabels: Record<string, { title: string; description: string; variables: string[] }> = {
+    paymentLink: { 
+      title: "Lien de paiement", 
+      description: "Envoyé quand un client commande",
+      variables: ["{{clientName}}", "{{productName}}", "{{amount}}", "{{expiresIn}}", "{{paymentUrl}}"]
+    },
+    paymentConfirmed: { 
+      title: "Paiement confirmé", 
+      description: "Après paiement réussi",
+      variables: ["{{clientName}}", "{{productName}}", "{{amount}}", "{{reference}}"]
+    },
+    paymentReminder: { 
+      title: "Rappel de paiement", 
+      description: "Avant expiration du lien",
+      variables: ["{{clientName}}", "{{productName}}", "{{amount}}", "{{remainingMinutes}}", "{{paymentUrl}}"]
+    },
+    orderExpired: { 
+      title: "Commande expirée", 
+      description: "Après délai dépassé",
+      variables: ["{{clientName}}", "{{productName}}"]
+    }
+  };
 
   const { data: fetchedConfig, isLoading } = useQuery({
     queryKey: ["vendorConfig", vendor.id],
@@ -251,8 +331,40 @@ function VendorConfigDialog({ vendor, onClose }: { vendor: Vendor; onClose: () =
         reservationDurationMinutes: fetchedConfig.reservationDurationMinutes,
         segment: fetchedConfig.segment,
       });
+      // Load message templates if saved
+      if (fetchedConfig.messageTemplates) {
+        try {
+          const savedTemplates = JSON.parse(fetchedConfig.messageTemplates);
+          setMessageTemplates(prev => ({ ...prev, ...savedTemplates }));
+        } catch (e) {
+          console.error("Failed to parse message templates:", e);
+        }
+      }
     }
   }, [fetchedConfig]);
+
+  const updateTemplate = (templateKey: string, field: 'header' | 'body' | 'footer', value: string) => {
+    setMessageTemplates(prev => ({
+      ...prev,
+      [templateKey]: { ...prev[templateKey as keyof typeof prev], [field]: value }
+    }));
+    setTemplatesHaveChanges(true);
+  };
+
+  const resetTemplateToDefault = (templateKey: string) => {
+    if (defaultTemplates[templateKey as keyof typeof defaultTemplates]) {
+      setMessageTemplates(prev => ({ 
+        ...prev, 
+        [templateKey]: defaultTemplates[templateKey as keyof typeof defaultTemplates] 
+      }));
+      setTemplatesHaveChanges(true);
+    }
+  };
+
+  const handleSaveTemplates = () => {
+    mutation.mutate({ messageTemplates: JSON.stringify(messageTemplates) } as any);
+    setTemplatesHaveChanges(false);
+  };
 
   const mutation = useMutation({
     mutationFn: (data: Partial<VendorConfig>) => updateVendorConfig(vendor.id, data),
@@ -303,7 +415,7 @@ function VendorConfigDialog({ vendor, onClose }: { vendor: Vendor; onClose: () =
           Configuration - {vendor.businessName || vendor.email}
         </DialogTitle>
         <DialogDescription>
-          Configurer les tokens WhatsApp API et les paramètres du vendeur
+          Configurer les paramètres WhatsApp et les messages pour ce vendeur
         </DialogDescription>
       </DialogHeader>
 
@@ -312,7 +424,7 @@ function VendorConfigDialog({ vendor, onClose }: { vendor: Vendor; onClose: () =
           <Loader2 className="w-6 h-6 animate-spin" />
         </div>
       ) : (
-        <div className="space-y-6 mt-4">
+        <div className="space-y-4 mt-4">
           {/* Vendor Info */}
           <div className="p-4 bg-muted/50 rounded-lg space-y-2">
             <div className="flex items-center justify-between">
@@ -331,31 +443,45 @@ function VendorConfigDialog({ vendor, onClose }: { vendor: Vendor; onClose: () =
             </div>
           </div>
 
-          <Separator />
+          {/* Tabs */}
+          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "api" | "templates")} className="w-full">
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="api" className="flex items-center gap-2">
+                <MessageCircle className="w-4 h-4" />
+                API & Paramètres
+              </TabsTrigger>
+              <TabsTrigger value="templates" className="flex items-center gap-2">
+                <FileText className="w-4 h-4" />
+                Messages
+                {templatesHaveChanges && <span className="w-2 h-2 bg-amber-500 rounded-full" />}
+              </TabsTrigger>
+            </TabsList>
 
-          {/* WhatsApp API Config */}
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="font-semibold flex items-center gap-2">
-                <MessageCircle className="w-4 h-4 text-green-500" />
-                WhatsApp Business API
-              </h3>
-              {isWhatsAppConfigured ? (
-                <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
-                  <CheckCircle2 className="w-3 h-3 mr-1" /> Configuré
-                </Badge>
-              ) : (
-                <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">
-                  <AlertTriangle className="w-3 h-3 mr-1" /> Non configuré
-                </Badge>
-              )}
-            </div>
-            
-            <div className="space-y-3">
-              <div className="space-y-2">
-                <Label className="flex items-center gap-2">
-                  <Phone className="w-3 h-3" />
-                  Phone Number ID
+            {/* API Tab */}
+            <TabsContent value="api" className="space-y-4 mt-4">
+              {/* WhatsApp API Config */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-semibold flex items-center gap-2">
+                    <MessageCircle className="w-4 h-4 text-green-500" />
+                    WhatsApp Business API
+                  </h3>
+                  {isWhatsAppConfigured ? (
+                    <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+                      <CheckCircle2 className="w-3 h-3 mr-1" /> Configuré
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">
+                      <AlertTriangle className="w-3 h-3 mr-1" /> Non configuré
+                    </Badge>
+                  )}
+                </div>
+                
+                <div className="space-y-3">
+                  <div className="space-y-2">
+                    <Label className="flex items-center gap-2">
+                      <Phone className="w-3 h-3" />
+                      Phone Number ID
                 </Label>
                 <Input
                   value={config.whatsappPhoneNumberId || ""}
@@ -548,8 +674,153 @@ function VendorConfigDialog({ vendor, onClose }: { vendor: Vendor; onClose: () =
             ) : (
               <Save className="w-4 h-4 mr-2" />
             )}
-            Sauvegarder
+            Sauvegarder API & Paramètres
           </Button>
+            </TabsContent>
+
+            {/* Templates Tab */}
+            <TabsContent value="templates" className="space-y-4 mt-4">
+              <p className="text-sm text-muted-foreground">
+                Personnalisez les messages WhatsApp envoyés aux clients de ce vendeur.
+              </p>
+
+              <div className="space-y-3">
+                {Object.entries(messageTemplates).map(([key, template]) => {
+                  const label = templateLabels[key];
+                  const isExpanded = expandedTemplate === key;
+                  const isPreview = previewTemplate === key;
+                  
+                  return (
+                    <div key={key} className="border rounded-lg overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => setExpandedTemplate(isExpanded ? null : key)}
+                        className="w-full flex items-center justify-between p-3 hover:bg-muted/50 transition-colors"
+                      >
+                        <div className="text-left">
+                          <p className="font-medium text-sm">{label.title}</p>
+                          <p className="text-xs text-muted-foreground">{label.description}</p>
+                        </div>
+                        {isExpanded ? (
+                          <ChevronUp className="w-4 h-4 text-muted-foreground" />
+                        ) : (
+                          <ChevronDown className="w-4 h-4 text-muted-foreground" />
+                        )}
+                      </button>
+
+                      {isExpanded && (
+                        <div className="border-t p-3 space-y-3 bg-muted/30">
+                          {/* Variables */}
+                          <div className="flex flex-wrap gap-1">
+                            <span className="text-xs text-muted-foreground mr-1">Variables:</span>
+                            {label.variables.map((v) => (
+                              <Badge key={v} variant="secondary" className="text-xs font-mono">{v}</Badge>
+                            ))}
+                          </div>
+
+                          {/* Header */}
+                          <div className="space-y-1">
+                            <Label className="text-xs uppercase text-muted-foreground">En-tête (60 max)</Label>
+                            <Input
+                              value={template.header}
+                              onChange={(e) => updateTemplate(key, 'header', e.target.value.slice(0, 60))}
+                              placeholder="En-tête"
+                              maxLength={60}
+                              className="text-sm"
+                            />
+                          </div>
+
+                          {/* Body */}
+                          <div className="space-y-1">
+                            <Label className="text-xs uppercase text-muted-foreground">Corps (1024 max)</Label>
+                            <Textarea
+                              value={template.body}
+                              onChange={(e) => updateTemplate(key, 'body', e.target.value.slice(0, 1024))}
+                              placeholder="Message"
+                              rows={5}
+                              className="font-mono text-xs"
+                              maxLength={1024}
+                            />
+                          </div>
+
+                          {/* Footer */}
+                          <div className="space-y-1">
+                            <Label className="text-xs uppercase text-muted-foreground">Pied de page (60 max)</Label>
+                            <Input
+                              value={template.footer}
+                              onChange={(e) => updateTemplate(key, 'footer', e.target.value.slice(0, 60))}
+                              placeholder="Pied de page"
+                              maxLength={60}
+                              className="text-sm"
+                            />
+                          </div>
+
+                          {/* Actions */}
+                          <div className="flex items-center gap-2 pt-1">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setPreviewTemplate(isPreview ? null : key)}
+                            >
+                              <Eye className="w-3 h-3 mr-1" />
+                              {isPreview ? "Masquer" : "Aperçu"}
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => resetTemplateToDefault(key)}
+                            >
+                              <RotateCcw className="w-3 h-3 mr-1" />
+                              Défaut
+                            </Button>
+                          </div>
+
+                          {/* Preview */}
+                          {isPreview && (
+                            <div className="p-3 bg-green-50 dark:bg-green-950/30 rounded-lg border border-green-200 dark:border-green-800">
+                              <p className="text-xs text-green-600 dark:text-green-400 mb-2 font-medium">APERÇU</p>
+                              <div className="bg-white dark:bg-gray-900 rounded-lg p-2 shadow-sm text-sm">
+                                {template.header && (
+                                  <p className="font-bold mb-1">{template.header}</p>
+                                )}
+                                <p className="whitespace-pre-wrap text-xs">{template.body
+                                  .replace("{{clientName}}", "Marie")
+                                  .replace("{{productName}}", "Robe fleurie")
+                                  .replace("{{amount}}", "15 000")
+                                  .replace("{{expiresIn}}", "10")
+                                  .replace("{{remainingMinutes}}", "5")
+                                  .replace("{{paymentUrl}}", "livepay.tech/pay/abc123")
+                                  .replace("{{reference}}", "LP-2024-001")
+                                }</p>
+                                {template.footer && (
+                                  <p className="text-xs text-muted-foreground mt-2 italic">{template.footer}</p>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              <Button 
+                className="w-full" 
+                onClick={handleSaveTemplates}
+                disabled={mutation.isPending || !templatesHaveChanges}
+              >
+                {mutation.isPending ? (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <Save className="w-4 h-4 mr-2" />
+                )}
+                Sauvegarder les messages
+              </Button>
+            </TabsContent>
+          </Tabs>
         </div>
       )}
     </DialogContent>

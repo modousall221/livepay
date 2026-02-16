@@ -60,10 +60,29 @@ export interface UserProfile {
 // Auth functions
 export async function loginWithEmail(email: string, password: string): Promise<UserProfile> {
   const userCredential = await signInWithEmailAndPassword(auth, email, password);
-  const profile = await getUserProfile(userCredential.user.uid);
+  const user = userCredential.user;
+  let profile = await getUserProfile(user.uid);
+  
+  // If profile doesn't exist in Firestore, create it (migration from Auth only)
   if (!profile) {
-    throw new Error("Profil utilisateur introuvable");
+    console.log("Creating missing user profile in Firestore...");
+    profile = {
+      id: user.uid,
+      email: user.email || email.toLowerCase(),
+      firstName: user.displayName?.split(' ')[0],
+      lastName: user.displayName?.split(' ').slice(1).join(' '),
+      role: "vendor",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    
+    await setDoc(doc(db, "users", user.uid), {
+      ...profile,
+      createdAt: Timestamp.fromDate(profile.createdAt),
+      updatedAt: Timestamp.fromDate(profile.updatedAt),
+    });
   }
+  
   return profile;
 }
 
@@ -139,7 +158,28 @@ export function subscribeToAuth(callback: (user: UserProfile | null) => void): (
   return onAuthStateChanged(auth, async (firebaseUser) => {
     if (firebaseUser) {
       try {
-        const profile = await getUserProfile(firebaseUser.uid);
+        let profile = await getUserProfile(firebaseUser.uid);
+        
+        // If profile doesn't exist in Firestore, create it
+        if (!profile) {
+          console.log("Creating missing user profile in Firestore (auth state)...");
+          profile = {
+            id: firebaseUser.uid,
+            email: firebaseUser.email || "",
+            firstName: firebaseUser.displayName?.split(' ')[0],
+            lastName: firebaseUser.displayName?.split(' ').slice(1).join(' '),
+            role: "vendor",
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          };
+          
+          await setDoc(doc(db, "users", firebaseUser.uid), {
+            ...profile,
+            createdAt: Timestamp.fromDate(profile.createdAt),
+            updatedAt: Timestamp.fromDate(profile.updatedAt),
+          });
+        }
+        
         callback(profile);
       } catch (error) {
         console.error("Error getting user profile:", error);

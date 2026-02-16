@@ -8,18 +8,15 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Share2,
-  QrCode,
   Copy,
   Check,
   MessageCircle,
   Link2,
-  Smartphone,
-  Download,
+  ImageIcon,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { type Product } from "@/lib/firebase";
@@ -52,7 +49,6 @@ export function ProductShareDialog({
       price: product.price,
       shareUrl,
       whatsappDeepLink,
-      qrData: shareUrl,
     };
   }, [product]);
 
@@ -74,40 +70,15 @@ export function ProductShareDialog({
       } catch (err) {
         // User cancelled
       }
+    } else {
+      // Fallback: copy link
+      copyToClipboard(shareInfo.shareUrl, "Lien");
     }
   };
 
-  const downloadQRCode = () => {
-    if (!shareInfo) return;
-    
-    // Create a canvas element and draw the QR
-    const canvas = document.createElement("canvas");
-    const size = 300;
-    canvas.width = size;
-    canvas.height = size;
-    const ctx = canvas.getContext("2d");
-    
-    if (ctx) {
-      // White background
-      ctx.fillStyle = "white";
-      ctx.fillRect(0, 0, size, size);
-      
-      // Draw QR code image
-      const img = document.querySelector(`[data-qr-product="${product.id}"]`) as HTMLImageElement;
-      if (img) {
-        ctx.drawImage(img, 0, 0, size, size);
-        
-        // Download
-        const link = document.createElement("a");
-        link.download = `qr-${shareInfo.shareCode}.png`;
-        link.href = canvas.toDataURL("image/png");
-        link.click();
-      }
-    }
+  const formatPrice = (price: number) => {
+    return price.toLocaleString("fr-FR") + " FCFA";
   };
-
-  // Generate QR code URL using a free API
-  const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(shareInfo.shareUrl)}`;
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -126,154 +97,111 @@ export function ProductShareDialog({
           </DialogTitle>
         </DialogHeader>
 
-        <Tabs defaultValue="qr" className="w-full">
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="qr" className="gap-1">
-              <QrCode className="w-3 h-3" />
-              QR Code
-            </TabsTrigger>
-            <TabsTrigger value="link" className="gap-1">
-              <Link2 className="w-3 h-3" />
-              Lien
-            </TabsTrigger>
-            <TabsTrigger value="code" className="gap-1">
-              <Smartphone className="w-3 h-3" />
-              Code
-            </TabsTrigger>
-          </TabsList>
-
-          {/* QR Code Tab */}
-          <TabsContent value="qr" className="space-y-4">
-            <div className="bg-white p-4 rounded-lg mx-auto w-fit">
+        <div className="space-y-4">
+          {/* Product Image */}
+          <div className="relative aspect-square w-full max-w-[280px] mx-auto rounded-xl overflow-hidden bg-muted">
+            {product.imageUrl ? (
               <img
-                src={qrCodeUrl}
-                alt="QR Code"
-                className="w-48 h-48"
-                data-qr-product={product.id}
+                src={product.imageUrl}
+                alt={product.name}
+                className="w-full h-full object-cover"
               />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-muted-foreground">
+                <ImageIcon className="w-16 h-16" />
+              </div>
+            )}
+            {/* Price badge overlay */}
+            <div className="absolute bottom-3 right-3">
+              <Badge className="bg-green-600 hover:bg-green-600 text-white text-lg px-3 py-1 font-bold shadow-lg">
+                {formatPrice(product.price)}
+              </Badge>
             </div>
-            <p className="text-sm text-center text-muted-foreground">
-              Montrez ce QR code pendant votre live !<br />
-              Les clients peuvent le scanner pour commander.
-            </p>
+          </div>
+
+          {/* Product Name & Description */}
+          <div className="text-center space-y-2">
+            <h3 className="text-xl font-semibold">{product.name}</h3>
+            {product.description && (
+              <p className="text-sm text-muted-foreground line-clamp-3">
+                {product.description}
+              </p>
+            )}
+          </div>
+
+          {/* Product Code - Copiable */}
+          <div className="bg-gradient-to-br from-green-50 to-emerald-100 dark:from-green-900/30 dark:to-emerald-900/30 rounded-xl p-4">
+            <Label className="text-xs text-muted-foreground block text-center mb-2">
+              Code produit (à dicter en live)
+            </Label>
+            <div className="flex items-center justify-center gap-3">
+              <span className="text-3xl font-mono font-bold tracking-wider text-green-600 dark:text-green-400">
+                {shareInfo.keyword}
+              </span>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-10 w-10"
+                onClick={() => copyToClipboard(shareInfo.keyword, "Code")}
+              >
+                {copied === "Code" ? (
+                  <Check className="w-5 h-5 text-green-600" />
+                ) : (
+                  <Copy className="w-5 h-5" />
+                )}
+              </Button>
+            </div>
+          </div>
+
+          {/* Share Link */}
+          <div className="space-y-2">
+            <Label className="text-xs text-muted-foreground">Lien de commande</Label>
             <div className="flex gap-2">
+              <Input 
+                value={shareInfo.shareUrl} 
+                readOnly 
+                className="font-mono text-xs bg-muted" 
+              />
               <Button
                 variant="outline"
-                className="flex-1"
-                onClick={downloadQRCode}
+                size="icon"
+                onClick={() => copyToClipboard(shareInfo.shareUrl, "Lien")}
               >
-                <Download className="w-4 h-4 mr-2" />
-                Télécharger
-              </Button>
-              <Button
-                className="flex-1 bg-green-600 hover:bg-green-700"
-                onClick={handleShare}
-              >
-                <Share2 className="w-4 h-4 mr-2" />
-                Partager
+                {copied === "Lien" ? (
+                  <Check className="w-4 h-4 text-green-600" />
+                ) : (
+                  <Link2 className="w-4 h-4" />
+                )}
               </Button>
             </div>
-          </TabsContent>
+          </div>
 
-          {/* Link Tab */}
-          <TabsContent value="link" className="space-y-4">
-            <div className="space-y-3">
-              <div>
-                <Label className="text-xs text-muted-foreground">Lien de partage</Label>
-                <div className="flex gap-2 mt-1">
-                  <Input value={shareInfo.shareUrl} readOnly className="font-mono text-sm" />
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    onClick={() => copyToClipboard(shareInfo.shareUrl, "Lien")}
-                  >
-                    {copied === "Lien" ? (
-                      <Check className="w-4 h-4 text-green-600" />
-                    ) : (
-                      <Copy className="w-4 h-4" />
-                    )}
-                  </Button>
-                </div>
-              </div>
-
-              <div>
-                <Label className="text-xs text-muted-foreground">Lien WhatsApp direct</Label>
-                <div className="flex gap-2 mt-1">
-                  <Input
-                    value={shareInfo.whatsappDeepLink}
-                    readOnly
-                    className="font-mono text-xs"
-                  />
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    onClick={() => copyToClipboard(shareInfo.whatsappDeepLink, "Lien WhatsApp")}
-                  >
-                    {copied === "Lien WhatsApp" ? (
-                      <Check className="w-4 h-4 text-green-600" />
-                    ) : (
-                      <Copy className="w-4 h-4" />
-                    )}
-                  </Button>
-                </div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Ce lien ouvre WhatsApp avec le code produit pré-rempli
-                </p>
-              </div>
-            </div>
-
+          {/* Action Buttons */}
+          <div className="flex gap-2 pt-2">
             <Button
-              className="w-full bg-green-600 hover:bg-green-700"
+              variant="outline"
+              className="flex-1"
               onClick={() => window.open(shareInfo.whatsappDeepLink, "_blank")}
             >
               <MessageCircle className="w-4 h-4 mr-2" />
-              Tester le lien WhatsApp
+              WhatsApp
             </Button>
-          </TabsContent>
+            <Button
+              className="flex-1 bg-green-600 hover:bg-green-700"
+              onClick={handleShare}
+            >
+              <Share2 className="w-4 h-4 mr-2" />
+              Partager
+            </Button>
+          </div>
 
-          {/* Code Tab */}
-          <TabsContent value="code" className="space-y-4">
-            <div className="bg-gradient-to-br from-green-50 to-emerald-100 dark:from-green-900/30 dark:to-emerald-900/30 rounded-lg p-6 text-center">
-              <p className="text-sm text-muted-foreground mb-2">Code produit à dicter en live :</p>
-              <div className="flex items-center justify-center gap-3">
-                <span className="text-4xl font-mono font-bold tracking-wider text-green-600 dark:text-green-400">
-                  {shareInfo.keyword}
-                </span>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => copyToClipboard(shareInfo.keyword, "Code")}
-                >
-                  {copied === "Code" ? (
-                    <Check className="w-5 h-5 text-green-600" />
-                  ) : (
-                    <Copy className="w-5 h-5" />
-                  )}
-                </Button>
-              </div>
-            </div>
-
-            <div className="bg-muted/50 rounded-lg p-4 text-center">
-              <p className="text-sm text-muted-foreground mb-2">Code court de partage :</p>
-              <Badge variant="outline" className="font-mono text-lg px-4 py-1">
-                {shareInfo.shareCode}
-              </Badge>
-              <p className="text-xs text-muted-foreground mt-2">
-                URL: livepay.tech/p/{shareInfo.shareCode}
-              </p>
-            </div>
-
-            <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4 text-sm">
-              <p className="font-medium text-blue-800 dark:text-blue-300 mb-1">
-                💡 Conseil pour le live :
-              </p>
-              <p className="text-blue-700 dark:text-blue-400">
-                "Pour commander, envoyez <strong>{shareInfo.keyword}</strong> sur mon WhatsApp 
-                ou scannez le QR code à l'écran !"
-              </p>
-            </div>
-          </TabsContent>
-        </Tabs>
+          {/* Tip */}
+          <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3 text-sm">
+            <p className="text-blue-700 dark:text-blue-400 text-center">
+              💡 "Pour commander, envoyez <strong>{shareInfo.keyword}</strong> sur mon WhatsApp !"
+            </p>
+          </div>
+        </div>
       </DialogContent>
     </Dialog>
   );

@@ -156,8 +156,8 @@ export default function Settings() {
   const [profileData, setProfileData] = useState({
     firstName: user?.firstName || "",
     lastName: user?.lastName || "",
-    businessName: (user as any)?.businessName || "",
-    phone: (user as any)?.phone || "",
+    businessName: user?.businessName || "",
+    phone: user?.phone || "",
   });
 
   useEffect(() => {
@@ -165,8 +165,8 @@ export default function Settings() {
       setProfileData({
         firstName: user.firstName || "",
         lastName: user.lastName || "",
-        businessName: (user as any)?.businessName || "",
-        phone: (user as any)?.phone || "",
+        businessName: user.businessName || "",
+        phone: user.phone || "",
       });
     }
   }, [user]);

@@ -48,9 +48,15 @@ interface Product {
   keyword: string;
   name: string;
   price: number;
+  originalPrice?: number | null;
   stock: number;
   reservedStock: number;
   active: boolean;
+  featured?: boolean | null;
+  imageUrl?: string | null;
+  videoUrl?: string | null;
+  category?: string | null;
+  shareCode?: string | null;
 }
 
 interface OrderStats {

@@ -86,10 +86,10 @@ export default function Products() {
         stock: editingProduct.stock || 0,
         description: editingProduct.description || "",
         imageUrl: editingProduct.imageUrl || "",
-        videoUrl: (editingProduct as any).videoUrl || "",
-        category: (editingProduct as any).category || "",
-        originalPrice: (editingProduct as any).originalPrice || 0,
-        featured: (editingProduct as any).featured || false,
+        videoUrl: editingProduct.videoUrl || "",
+        category: editingProduct.category || "",
+        originalPrice: editingProduct.originalPrice || 0,
+        featured: editingProduct.featured || false,
         active: editingProduct.active,
       });
     } else if (!open) {
@@ -441,10 +441,9 @@ export default function Products() {
           {products?.map((product) => {
             const availableStock = product.stock - (product.reservedStock || 0);
             const isLowStock = availableStock <= 3 && product.active;
-            const extProduct = product as any;
-            const categoryLabel = PRODUCT_CATEGORIES.find(c => c.value === extProduct.category)?.label;
+            const categoryLabel = PRODUCT_CATEGORIES.find(c => c.value === product.category)?.label;
             return (
-            <Card key={product.id} className={`overflow-hidden hover-elevate ${isLowStock ? "border-amber-300" : ""} ${extProduct.featured ? "ring-2 ring-amber-400" : ""}`} data-testid={`card-product-${product.id}`}>
+            <Card key={product.id} className={`overflow-hidden hover-elevate ${isLowStock ? "border-amber-300" : ""} ${product.featured ? "ring-2 ring-amber-400" : ""}`} data-testid={`card-product-${product.id}`}>
               {/* Image thumbnail */}
               {product.imageUrl ? (
                 <div className="relative h-32 bg-gray-100">
@@ -453,7 +452,7 @@ export default function Products() {
                     alt={product.name}
                     className="w-full h-full object-cover"
                   />
-                  {extProduct.featured && (
+                  {product.featured && (
                     <div className="absolute top-2 left-2">
                       <Badge className="bg-amber-500 text-white">
                         <Star className="w-3 h-3 mr-1 fill-current" />
@@ -461,7 +460,7 @@ export default function Products() {
                       </Badge>
                     </div>
                   )}
-                  {extProduct.videoUrl && (
+                  {product.videoUrl && (
                     <div className="absolute top-2 right-2">
                       <Badge variant="secondary">
                         <Video className="w-3 h-3 mr-1" />
@@ -473,7 +472,7 @@ export default function Products() {
               ) : (
                 <div className="relative h-24 bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-800 dark:to-gray-700 flex items-center justify-center">
                   <Package className="w-8 h-8 text-gray-300" />
-                  {extProduct.featured && (
+                  {product.featured && (
                     <div className="absolute top-2 left-2">
                       <Badge className="bg-amber-500 text-white">
                         <Star className="w-3 h-3 mr-1 fill-current" />
@@ -510,9 +509,9 @@ export default function Products() {
                       <p className="text-lg font-bold text-primary">
                         {product.price.toLocaleString("fr-FR")} F
                       </p>
-                      {extProduct.originalPrice > 0 && extProduct.originalPrice > product.price && (
+                      {product.originalPrice && product.originalPrice > 0 && product.originalPrice > product.price && (
                         <p className="text-sm text-muted-foreground line-through">
-                          {extProduct.originalPrice.toLocaleString("fr-FR")} F
+                          {product.originalPrice.toLocaleString("fr-FR")} F
                         </p>
                       )}
                     </div>

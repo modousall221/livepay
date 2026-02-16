@@ -1,0 +1,95 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    // Users collection
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isAuthenticated() && request.auth.uid == userId;
+      allow update: if isOwner(userId) || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Vendor configs
+    match /vendorConfigs/{configId} {
+      allow read: if isAuthenticated() && 
+        (resource.data.vendorId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && 
+        request.resource.data.vendorId == request.auth.uid;
+      allow update: if isAuthenticated() && 
+        (resource.data.vendorId == request.auth.uid || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    // Products
+    match /products/{productId} {
+      // Public read for active products (sharing)
+      allow read: if resource.data.active == true || 
+        (isAuthenticated() && resource.data.vendorId == request.auth.uid) ||
+        isAdmin();
+      allow create: if isAuthenticated() && 
+        request.resource.data.vendorId == request.auth.uid;
+      allow update: if isAuthenticated() && 
+        (resource.data.vendorId == request.auth.uid || isAdmin());
+      allow delete: if isAuthenticated() && 
+        (resource.data.vendorId == request.auth.uid || isAdmin());
+    }
+
+    // Orders
+    match /orders/{orderId} {
+      allow read: if isAuthenticated() && 
+        (resource.data.vendorId == request.auth.uid || isAdmin());
+      allow create: if true; // Public can create orders (WhatsApp clients)
+      allow update: if isAuthenticated() && 
+        (resource.data.vendorId == request.auth.uid || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    // Live sessions
+    match /liveSessions/{sessionId} {
+      allow read: if isAuthenticated() && 
+        (resource.data.vendorId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && 
+        request.resource.data.vendorId == request.auth.uid;
+      allow update: if isAuthenticated() && 
+        (resource.data.vendorId == request.auth.uid || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    // Invoices
+    match /invoices/{invoiceId} {
+      allow read: if isAuthenticated() && 
+        (resource.data.vendorId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && 
+        request.resource.data.vendorId == request.auth.uid;
+      allow update: if isAuthenticated() && 
+        (resource.data.vendorId == request.auth.uid || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    // Clients (CRM)
+    match /clients/{clientId} {
+      allow read: if isAuthenticated() && 
+        (resource.data.vendorId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && 
+        request.resource.data.vendorId == request.auth.uid;
+      allow update: if isAuthenticated() && 
+        (resource.data.vendorId == request.auth.uid || isAdmin());
+      allow delete: if isAuthenticated() && 
+        (resource.data.vendorId == request.auth.uid || isAdmin());
+    }
+  }
+}

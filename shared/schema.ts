@@ -78,7 +78,6 @@ export const products = pgTable("products", {
   description: text("description"),
   imageUrl: text("image_url"), // Image principale
   images: text("images"), // JSON array d'URLs d'images supplémentaires
-  videoUrl: text("video_url"), // URL vidéo (TikTok, YouTube, etc.)
   category: varchar("category", { length: 50 }), // Catégorie du produit
   stock: integer("stock").default(0).notNull(), // Stock disponible
   reservedStock: integer("reserved_stock").default(0).notNull(), // Stock réservé (pending orders)

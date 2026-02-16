@@ -18,11 +18,12 @@ import {
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { insertProductSchema, type Product, type InsertProduct } from "@shared/schema";
-import { Plus, Package, Trash2, Pencil, Share2, QrCode, Star, ImageIcon, Video, Tag, Percent, Upload, X, Loader2 } from "lucide-react";
+import { Plus, Package, Trash2, Pencil, Share2, QrCode, Star, ImageIcon, Tag, Percent, Upload, X, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { isUnauthorizedError } from "@/lib/auth-utils";
 import { useState, useEffect, useRef } from "react";
 import { ProductShareDialog } from "@/components/product-share-dialog";
+import { uploadImage } from "@/lib/firebase";
 import {
   Select,
   SelectContent,
@@ -55,7 +56,7 @@ export default function Products() {
     queryKey: ["/api/products"],
   });
 
-  // Image upload handler
+  // Image upload handler - Firebase Storage
   const handleImageUpload = async (file: File) => {
     if (!file) return;
     
@@ -74,22 +75,12 @@ export default function Products() {
     
     setIsUploading(true);
     try {
-      const formData = new FormData();
-      formData.append("image", file);
+      const uniqueName = `product-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      const extension = file.name.split('.').pop() || 'jpg';
+      const path = `products/${uniqueName}.${extension}`;
       
-      const response = await fetch("/api/upload", {
-        method: "POST",
-        credentials: "include",
-        body: formData,
-      });
-      
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.message || "Erreur upload");
-      }
-      
-      const data = await response.json();
-      form.setValue("imageUrl", data.url);
+      const downloadUrl = await uploadImage(file, path);
+      form.setValue("imageUrl", downloadUrl);
       toast({ title: "Image uploadée !" });
     } catch (error: any) {
       console.error("Upload error:", error);
@@ -114,7 +105,6 @@ export default function Products() {
       stock: 0,
       description: "",
       imageUrl: "",
-      videoUrl: "",
       category: "",
       originalPrice: 0,
       featured: false,
@@ -132,7 +122,6 @@ export default function Products() {
         stock: editingProduct.stock || 0,
         description: editingProduct.description || "",
         imageUrl: editingProduct.imageUrl || "",
-        videoUrl: editingProduct.videoUrl || "",
         category: editingProduct.category || "",
         originalPrice: editingProduct.originalPrice || 0,
         featured: editingProduct.featured || false,
@@ -146,7 +135,6 @@ export default function Products() {
         stock: 0,
         description: "",
         imageUrl: "",
-        videoUrl: "",
         category: "",
         originalPrice: 0,
         featured: false,
@@ -236,7 +224,6 @@ export default function Products() {
       stock: 0,
       description: "",
       imageUrl: "",
-      videoUrl: "",
       category: "",
       originalPrice: 0,
       featured: false,
@@ -433,22 +420,6 @@ export default function Products() {
                 </div>
               </div>
 
-              {/* Video URL */}
-              <div className="space-y-2">
-                <Label htmlFor="videoUrl" className="flex items-center gap-2">
-                  <Video className="w-4 h-4" />
-                  Vidéo du produit (optionnel)
-                </Label>
-                <Input
-                  id="videoUrl"
-                  {...form.register("videoUrl")}
-                  placeholder="https://tiktok.com/@... ou youtube.com/..."
-                />
-                <p className="text-xs text-muted-foreground">
-                  Lien TikTok, YouTube ou Reels Instagram
-                </p>
-              </div>
-
               {/* Original Price (for promotions) */}
               <div className="space-y-2">
                 <Label htmlFor="originalPrice" className="flex items-center gap-2">
@@ -548,14 +519,6 @@ export default function Products() {
                       <Badge className="bg-amber-500 text-white">
                         <Star className="w-3 h-3 mr-1 fill-current" />
                         Vedette
-                      </Badge>
-                    </div>
-                  )}
-                  {product.videoUrl && product.videoUrl.trim() && (
-                    <div className="absolute top-2 right-2">
-                      <Badge variant="secondary">
-                        <Video className="w-3 h-3 mr-1" />
-                        Vidéo
                       </Badge>
                     </div>
                   )}

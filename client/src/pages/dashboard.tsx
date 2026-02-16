@@ -54,7 +54,6 @@ interface Product {
   active: boolean;
   featured?: boolean | null;
   imageUrl?: string | null;
-  videoUrl?: string | null;
   category?: string | null;
   shareCode?: string | null;
 }

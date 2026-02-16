@@ -400,51 +400,58 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Invoice expired" });
       }
 
-      const paymentMethod = req.body?.paymentMethod || "wave";
-      const provider = getPaymentProvider(paymentMethod);
-      if (!provider) {
-        return res.status(400).json({ message: "Methode de paiement invalide" });
+      // Get vendor config to retrieve mobile money number
+      const vendorConfig = await storage.getVendorConfig(invoice.vendorId);
+      const vendorPhone = vendorConfig?.mobileMoneyNumber;
+      
+      if (!vendorPhone) {
+        return res.status(400).json({ 
+          message: "Le vendeur n'a pas configuré son numéro Mobile Money" 
+        });
       }
 
-      if (paymentMethod === "cash") {
-        const result = await provider.processPayment(invoice.id, invoice.amount, {
+      const paymentMethod = req.body?.paymentMethod || vendorConfig?.preferredPaymentMethod || "wave";
+      const provider = getPaymentProvider(paymentMethod);
+      if (!provider) {
+        return res.status(400).json({ message: "Méthode de paiement invalide" });
+      }
+
+      // Generate payment link with vendor's mobile money number
+      const result = await provider.generatePaymentLink(
+        invoice.amount,
+        vendorPhone,
+        invoice.token,
+        {
           clientName: invoice.clientName,
           clientPhone: invoice.clientPhone,
           productName: invoice.productName,
-        });
+        }
+      );
+
+      if (!result.success) {
+        return res.status(400).json({ message: result.error || "Échec de la génération du paiement" });
+      }
+
+      // For cash payments, mark as paid immediately
+      if (paymentMethod === "cash") {
         const updated = await storage.updateInvoiceStatus(invoice.id, "paid", paymentMethod, result.providerRef);
         return res.json({ success: true, invoice: updated });
       }
 
-      const result = await provider.processPayment(invoice.id, invoice.amount, {
-        clientName: invoice.clientName,
-        clientPhone: invoice.clientPhone,
-        productName: invoice.productName,
-        invoiceToken: invoice.token,
+      // For mobile money, return deep link and instructions
+      // Note: We don't mark as paid yet - payment confirmation will come separately
+      await storage.updateInvoiceStatus(invoice.id, "processing", paymentMethod, result.providerRef);
+      
+      return res.json({
+        success: true,
+        paymentMethod,
+        deepLink: result.deepLink,
+        ussdCode: result.ussdCode,
+        instructions: result.instructions,
+        vendorPhone,
+        amount: invoice.amount,
+        providerRef: result.providerRef,
       });
-
-      if (!result.success) {
-        return res.status(400).json({ message: result.error || "Echec du paiement" });
-      }
-
-      if (result.chargeId && result.redirectUrl) {
-        await storage.updateInvoiceBictorys(
-          invoice.id,
-          result.chargeId,
-          result.redirectUrl,
-          paymentMethod,
-          result.providerRef || ""
-        );
-        return res.json({
-          success: true,
-          redirect: true,
-          redirectUrl: result.redirectUrl,
-          chargeId: result.chargeId,
-        });
-      }
-
-      const updated = await storage.updateInvoiceStatus(invoice.id, "paid", paymentMethod, result.providerRef);
-      res.json({ success: true, invoice: updated });
     } catch (error) {
       console.error("Error processing payment:", error);
       res.status(500).json({ message: "Failed to process payment" });

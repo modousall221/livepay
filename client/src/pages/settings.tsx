@@ -28,7 +28,8 @@ import {
   Zap,
   CheckCircle,
   AlertCircle,
-  Terminal
+  Terminal,
+  Smartphone
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
@@ -138,6 +139,12 @@ export default function Settings() {
     autoReminderEnabled: true,
   });
 
+  // Config Mobile Money
+  const [mobileMoneyConfig, setMobileMoneyConfig] = useState({
+    mobileMoneyNumber: "",
+    preferredPaymentMethod: "wave",
+  });
+
   // Fetch vendor config
   const { data: vendorConfig } = useQuery({
     queryKey: ["/api/vendor/config"],
@@ -152,6 +159,10 @@ export default function Settings() {
         reservationDurationMinutes: vendorConfig.reservationDurationMinutes || 10,
         autoReplyEnabled: vendorConfig.autoReplyEnabled ?? true,
         autoReminderEnabled: vendorConfig.autoReminderEnabled ?? true,
+      });
+      setMobileMoneyConfig({
+        mobileMoneyNumber: vendorConfig.mobileMoneyNumber || "",
+        preferredPaymentMethod: vendorConfig.preferredPaymentMethod || "wave",
       });
     }
   }, [vendorConfig]);
@@ -244,6 +255,10 @@ export default function Settings() {
 
   const handleChatbotSave = () => {
     vendorConfigMutation.mutate(chatbotConfig);
+  };
+
+  const handleMobileMoneyConfigSave = () => {
+    vendorConfigMutation.mutate(mobileMoneyConfig);
   };
 
   return (
@@ -343,6 +358,94 @@ export default function Settings() {
             )}
           </Button>
         </form>
+      </Card>
+
+      {/* Section Mobile Money */}
+      <Card className="p-6 space-y-4">
+        <div className="flex items-center gap-2">
+          <Smartphone className="w-5 h-5 text-cyan-500" />
+          <h2 className="font-semibold">Paiement Mobile Money</h2>
+        </div>
+        
+        <p className="text-sm text-muted-foreground">
+          Configurez votre numéro Mobile Money pour recevoir les paiements directement de vos clients.
+        </p>
+
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="mobileMoneyNumber" className="flex items-center gap-2">
+              <Phone className="w-4 h-4" />
+              Numéro Mobile Money <span className="text-red-500">*</span>
+            </Label>
+            <Input
+              id="mobileMoneyNumber"
+              type="tel"
+              value={mobileMoneyConfig.mobileMoneyNumber}
+              onChange={(e) => setMobileMoneyConfig({ ...mobileMoneyConfig, mobileMoneyNumber: e.target.value })}
+              placeholder="221 77 123 45 67"
+              className="text-lg"
+            />
+            <p className="text-xs text-muted-foreground">
+              Numéro sur lequel vous recevrez les paiements (Wave, Orange Money, etc.)
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="preferredPaymentMethod">Méthode de paiement préférée</Label>
+            <Select
+              value={mobileMoneyConfig.preferredPaymentMethod}
+              onValueChange={(v) => setMobileMoneyConfig({ ...mobileMoneyConfig, preferredPaymentMethod: v })}
+            >
+              <SelectTrigger id="preferredPaymentMethod">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="wave">
+                  <span className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-cyan-500"></span>
+                    Wave
+                  </span>
+                </SelectItem>
+                <SelectItem value="orange_money">
+                  <span className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-orange-500"></span>
+                    Orange Money
+                  </span>
+                </SelectItem>
+                <SelectItem value="free_money">
+                  <span className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-red-500"></span>
+                    Free Money
+                  </span>
+                </SelectItem>
+                <SelectItem value="mtn_momo">
+                  <span className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-yellow-500"></span>
+                    MTN MoMo
+                  </span>
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Méthode proposée par défaut aux clients
+            </p>
+          </div>
+
+          <div className="p-3 bg-cyan-50 dark:bg-cyan-950/20 rounded-lg border border-cyan-200 dark:border-cyan-800">
+            <p className="text-sm text-cyan-700 dark:text-cyan-400">
+              💡 Les clients verront un lien pour vous payer directement via l'application Mobile Money avec le montant pré-rempli.
+            </p>
+          </div>
+        </div>
+
+        <Button onClick={handleMobileMoneyConfigSave} className="w-full" disabled={vendorConfigMutation.isPending}>
+          {vendorConfigMutation.isPending ? (
+            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+          ) : (
+            <Save className="w-4 h-4 mr-2" />
+          )}
+          Enregistrer Mobile Money
+        </Button>
       </Card>
 
       {/* Section Chatbot WhatsApp */}

@@ -3,7 +3,7 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Radio, Shield, Clock, CheckCircle2, XCircle, Loader2, CreditCard, Smartphone, Banknote, ExternalLink } from "lucide-react";
+import { Radio, Shield, Clock, CheckCircle2, XCircle, Loader2, CreditCard, Smartphone, Banknote, Copy, Phone, ExternalLink } from "lucide-react";
 import { useRoute, useSearch } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { useState, useEffect } from "react";
@@ -24,18 +24,37 @@ type PaymentMethod = {
   name: string;
   description: string;
   icon: string;
+  color?: string;
+};
+
+type PaymentResult = {
+  success: boolean;
+  paymentMethod: string;
+  deepLink?: string;
+  ussdCode?: string;
+  instructions?: string;
+  vendorPhone?: string;
+  amount?: number;
+  providerRef?: string;
 };
 
 const methodIcons: Record<string, typeof Smartphone> = {
   wave: Smartphone,
   orange: Smartphone,
+  orange_money: Smartphone,
+  free_money: Smartphone,
+  moov_money: Smartphone,
+  mtn_momo: Smartphone,
   card: CreditCard,
   cash: Banknote,
 };
 
 const methodColors: Record<string, string> = {
-  wave: "text-blue-500",
+  wave: "text-cyan-500",
   orange_money: "text-orange-500",
+  free_money: "text-red-500",
+  moov_money: "text-blue-600",
+  mtn_momo: "text-yellow-500",
   card: "text-violet-500",
   cash: "text-green-500",
 };
@@ -50,8 +69,8 @@ export default function Pay() {
   const [timeLeft, setTimeLeft] = useState("");
   const [expired, setExpired] = useState(false);
   const [selectedMethod, setSelectedMethod] = useState<string>("wave");
-  const [redirecting, setRedirecting] = useState(false);
   const [waitingPayment, setWaitingPayment] = useState(false);
+  const [paymentResult, setPaymentResult] = useState<PaymentResult | null>(null);
 
   const { data: invoice, isLoading, error } = useQuery<PaymentInvoice>({
     queryKey: ["/api/pay", token],
@@ -135,19 +154,33 @@ export default function Pay() {
       const res = await apiRequest("POST", `/api/pay/${token}`, { paymentMethod: selectedMethod });
       return res.json();
     },
-    onSuccess: (data: any) => {
-      if (data.redirect && data.redirectUrl) {
-        setRedirecting(true);
-        window.location.href = data.redirectUrl;
+    onSuccess: (data: PaymentResult) => {
+      if (data.success) {
+        // Show payment instructions with deep link and USSD
+        setPaymentResult(data);
+        
+        // If there's a deep link, try to open the app
+        if (data.deepLink) {
+          // Try to open the mobile money app
+          window.location.href = data.deepLink;
+        }
+        
+        // Start polling for payment confirmation
+        setWaitingPayment(true);
       } else {
-        queryClient.invalidateQueries({ queryKey: ["/api/pay", token] });
-        toast({ title: "Paiement effectue" });
+        toast({ title: "Erreur", description: "Échec de l'initialisation du paiement", variant: "destructive" });
       }
     },
     onError: (error: Error) => {
       toast({ title: "Erreur de paiement", description: error.message, variant: "destructive" });
     },
   });
+
+  const copyToClipboard = (text: string, label: string) => {
+    navigator.clipboard.writeText(text).then(() => {
+      toast({ title: `${label} copié !` });
+    });
+  };
 
   if (isLoading) {
     return (
@@ -236,12 +269,90 @@ export default function Pay() {
             )}
 
             {waitingPayment && isPending && (
-              <div className="flex flex-col items-center gap-3 py-4">
-                <Loader2 className="w-8 h-8 animate-spin text-primary" />
-                <div className="text-center">
-                  <p className="font-semibold">Verification du paiement...</p>
-                  <p className="text-xs text-muted-foreground mt-1">Veuillez patienter pendant la confirmation</p>
-                </div>
+              <div className="flex flex-col items-center gap-4 py-4">
+                {paymentResult ? (
+                  <>
+                    <div className="w-full space-y-4">
+                      <div className="text-center">
+                        <p className="font-semibold text-lg">Effectuez le paiement</p>
+                        <p className="text-sm text-muted-foreground mt-1">{paymentResult.instructions}</p>
+                      </div>
+
+                      {/* Deep Link Button */}
+                      {paymentResult.deepLink && (
+                        <Button
+                          className="w-full"
+                          size="lg"
+                          onClick={() => window.location.href = paymentResult.deepLink!}
+                        >
+                          <ExternalLink className="w-4 h-4 mr-2" />
+                          Ouvrir {(methods || []).find(m => m.id === paymentResult.paymentMethod)?.name || "l'application"}
+                        </Button>
+                      )}
+
+                      {/* USSD Code */}
+                      {paymentResult.ussdCode && (
+                        <div className="bg-muted rounded-lg p-4 space-y-2">
+                          <p className="text-xs text-muted-foreground font-medium">Code USSD (composez sur votre téléphone)</p>
+                          <div className="flex items-center justify-between gap-2">
+                            <code className="text-lg font-mono font-bold flex-1">{paymentResult.ussdCode}</code>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => copyToClipboard(paymentResult.ussdCode!, "Code USSD")}
+                            >
+                              <Copy className="w-4 h-4" />
+                            </Button>
+                          </div>
+                          {/* Direct dial link for mobile */}
+                          <a
+                            href={`tel:${paymentResult.ussdCode}`}
+                            className="inline-flex items-center gap-2 text-sm text-primary hover:underline"
+                          >
+                            <Phone className="w-4 h-4" />
+                            Appeler ce code
+                          </a>
+                        </div>
+                      )}
+
+                      {/* Vendor Phone */}
+                      {paymentResult.vendorPhone && (
+                        <div className="bg-muted/50 rounded-lg p-3 space-y-1">
+                          <p className="text-xs text-muted-foreground">Numéro du vendeur</p>
+                          <div className="flex items-center justify-between">
+                            <span className="font-medium">{paymentResult.vendorPhone}</span>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => copyToClipboard(paymentResult.vendorPhone!, "Numéro")}
+                            >
+                              <Copy className="w-4 h-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Amount reminder */}
+                      <div className="text-center py-2 border-t">
+                        <p className="text-sm text-muted-foreground">Montant à envoyer</p>
+                        <p className="text-2xl font-bold">{(paymentResult.amount || invoice.amount).toLocaleString("fr-FR")} FCFA</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>En attente de confirmation...</span>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                    <div className="text-center">
+                      <p className="font-semibold">Vérification du paiement...</p>
+                      <p className="text-xs text-muted-foreground mt-1">Veuillez patienter pendant la confirmation</p>
+                    </div>
+                  </>
+                )}
               </div>
             )}
 
@@ -288,15 +399,10 @@ export default function Pay() {
                   className="w-full"
                   size="lg"
                   onClick={() => payMutation.mutate()}
-                  disabled={payMutation.isPending || redirecting}
+                  disabled={payMutation.isPending}
                   data-testid="button-pay"
                 >
-                  {redirecting ? (
-                    <>
-                      <ExternalLink className="w-4 h-4 mr-2" />
-                      Redirection vers le paiement...
-                    </>
-                  ) : payMutation.isPending ? (
+                  {payMutation.isPending ? (
                     <>
                       <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                       Traitement...
@@ -308,7 +414,7 @@ export default function Pay() {
 
                 {selectedMethod !== "cash" && (
                   <p className="text-[10px] text-center text-muted-foreground">
-                    Vous serez redirige vers la plateforme de paiement securisee
+                    Vous serez redirigé vers l'application de paiement mobile
                   </p>
                 )}
               </>

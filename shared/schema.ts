@@ -18,10 +18,12 @@ export const vendorConfigs = pgTable("vendor_configs", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   vendorId: varchar("vendor_id").notNull().references(() => users.id).unique(),
   businessName: text("business_name").notNull(),
+  // Numéro Mobile Money pour recevoir les paiements (Wave, Orange Money)
+  mobileMoneyNumber: varchar("mobile_money_number", { length: 20 }),
+  preferredPaymentMethod: text("preferred_payment_method").default("wave"), // wave, orange_money
   whatsappPhoneNumberId: text("whatsapp_phone_number_id"), // Meta Phone Number ID
   whatsappAccessToken: text("whatsapp_access_token"), // Encrypted
   whatsappVerifyToken: text("whatsapp_verify_token"),
-  pspAccountReference: text("psp_account_reference"), // Référence compte PSP
   status: vendorStatusEnum("status").default("active").notNull(),
   liveMode: boolean("live_mode").default(false).notNull(), // Mode Live ON/OFF
   reservationDurationMinutes: integer("reservation_duration_minutes").default(10).notNull(),
@@ -72,11 +74,16 @@ export const products = pgTable("products", {
   shareCode: varchar("share_code", { length: 8 }).unique(), // Code court pour partage (ex: A1B2C3)
   name: text("name").notNull(),
   price: integer("price").notNull(),
+  originalPrice: integer("original_price"), // Prix barré (promotion)
   description: text("description"),
-  imageUrl: text("image_url"),
+  imageUrl: text("image_url"), // Image principale
+  images: text("images"), // JSON array d'URLs d'images supplémentaires
+  videoUrl: text("video_url"), // URL vidéo (TikTok, YouTube, etc.)
+  category: varchar("category", { length: 50 }), // Catégorie du produit
   stock: integer("stock").default(0).notNull(), // Stock disponible
   reservedStock: integer("reserved_stock").default(0).notNull(), // Stock réservé (pending orders)
   active: boolean("active").default(true).notNull(),
+  featured: boolean("featured").default(false), // Produit mis en avant
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

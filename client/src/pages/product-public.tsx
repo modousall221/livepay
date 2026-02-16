@@ -4,7 +4,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { MessageCircle, ShoppingBag, Share2, Copy, Check } from "lucide-react";
+import { MessageCircle, ShoppingBag, Share2, Copy, Check, Send, Camera, Video, Facebook,  Download } from "lucide-react";
 import { useState, useEffect } from "react";
 
 interface PublicProduct {
@@ -77,6 +77,58 @@ export default function ProductPublic() {
       await navigator.clipboard.writeText(window.location.href);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  // Social sharing handlers
+  const shareText = product ? `🔥 ${product.name}\n💰 ${product.price.toLocaleString("fr-FR")} FCFA\n📱 Code: ${product.keyword}\n\n👉 Commandez maintenant:` : "";
+  const shareUrl = typeof window !== 'undefined' ? window.location.href : '';
+  
+  const handleWhatsAppStatusShare = () => {
+    // WhatsApp Status opens the story/status composer
+    const text = encodeURIComponent(`${shareText}\n${shareUrl}`);
+    window.open(`https://wa.me/?text=${text}`, '_blank');
+  };
+
+  const handleTikTokShare = () => {
+    // TikTok doesn't have a direct share URL, so we copy and guide user
+    navigator.clipboard.writeText(`${shareText}\n${shareUrl}`);
+    alert("Texte copié ! 📋\n\nOuvrez TikTok, créez une vidéo et collez le texte dans la description.");
+  };
+
+  const handleSnapchatShare = () => {
+    // Snapchat creative kit URL (opens app if installed)
+    const url = `https://www.snapchat.com/share?url=${encodeURIComponent(shareUrl)}`;
+    window.open(url, '_blank');
+  };
+
+  const handleInstagramShare = () => {
+    // Instagram doesn't have a direct share URL
+    navigator.clipboard.writeText(`${shareText}\n${shareUrl}`);
+    alert("Texte copié ! 📋\n\nOuvrez Instagram, créez une story et ajoutez le lien dans la description.");
+  };
+
+  const handleFacebookShare = () => {
+    const url = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}&quote=${encodeURIComponent(shareText)}`;
+    window.open(url, '_blank');
+  };
+
+  const handleDownloadImage = async () => {
+    if (product?.imageUrl) {
+      try {
+        const response = await fetch(product.imageUrl);
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${product.name.replace(/\s+/g, '-')}.jpg`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      } catch (error) {
+        console.error("Error downloading image:", error);
+      }
     }
   };
 
@@ -210,6 +262,78 @@ export default function ProductPublic() {
               Cliquez pour ouvrir WhatsApp et envoyer automatiquement le code
             </p>
           )}
+
+          {/* Social Share Buttons */}
+          <div className="pt-4 border-t space-y-3">
+            <p className="text-sm text-center text-muted-foreground font-medium">
+              📢 Partager ce produit
+            </p>
+            <div className="grid grid-cols-3 gap-2">
+              {/* WhatsApp Status */}
+              <Button
+                variant="outline"
+                className="flex flex-col items-center gap-1 h-auto py-3 bg-green-50 hover:bg-green-100 border-green-200 dark:bg-green-950 dark:hover:bg-green-900 dark:border-green-800"
+                onClick={handleWhatsAppStatusShare}
+              >
+                <Send className="w-5 h-5 text-green-600" />
+                <span className="text-[10px] text-green-700 dark:text-green-400">WhatsApp</span>
+              </Button>
+
+              {/* TikTok */}
+              <Button
+                variant="outline"
+                className="flex flex-col items-center gap-1 h-auto py-3 bg-gray-50 hover:bg-gray-100 border-gray-200 dark:bg-gray-900 dark:hover:bg-gray-800"
+                onClick={handleTikTokShare}
+              >
+                <Video className="w-5 h-5 text-gray-800 dark:text-gray-200" />
+                <span className="text-[10px]">TikTok</span>
+              </Button>
+
+              {/* Snapchat */}
+              <Button
+                variant="outline"
+                className="flex flex-col items-center gap-1 h-auto py-3 bg-yellow-50 hover:bg-yellow-100 border-yellow-200 dark:bg-yellow-950 dark:hover:bg-yellow-900"
+                onClick={handleSnapchatShare}
+              >
+                <Camera className="w-5 h-5 text-yellow-600" />
+                <span className="text-[10px] text-yellow-700 dark:text-yellow-400">Snapchat</span>
+              </Button>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2">
+              {/* Instagram */}
+              <Button
+                variant="outline"
+                className="flex flex-col items-center gap-1 h-auto py-3 bg-pink-50 hover:bg-pink-100 border-pink-200 dark:bg-pink-950 dark:hover:bg-pink-900"
+                onClick={handleInstagramShare}
+              >
+                <Camera className="w-5 h-5 text-pink-600" />
+                <span className="text-[10px] text-pink-700 dark:text-pink-400">Instagram</span>
+              </Button>
+
+              {/* Facebook */}
+              <Button
+                variant="outline"
+                className="flex flex-col items-center gap-1 h-auto py-3 bg-blue-50 hover:bg-blue-100 border-blue-200 dark:bg-blue-950 dark:hover:bg-blue-900"
+                onClick={handleFacebookShare}
+              >
+                <Facebook className="w-5 h-5 text-blue-600" />
+                <span className="text-[10px] text-blue-700 dark:text-blue-400">Facebook</span>
+              </Button>
+
+              {/* Download Image */}
+              {product?.imageUrl && (
+                <Button
+                  variant="outline"
+                  className="flex flex-col items-center gap-1 h-auto py-3"
+                  onClick={handleDownloadImage}
+                >
+                  <Download className="w-5 h-5" />
+                  <span className="text-[10px]">Image</span>
+                </Button>
+              )}
+            </div>
+          </div>
         </div>
       </Card>
 

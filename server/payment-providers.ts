@@ -1,145 +1,206 @@
+// ============================================================================
+// MOBILE MONEY DIRECT PAYMENT - Pas de PSP intermédiaire
+// Génère des deep links vers les apps Wave et Orange Money
+// Le vendeur reçoit le paiement directement sur son numéro mobile money
+// ============================================================================
+
 export interface PaymentResult {
   success: boolean;
   providerRef?: string;
   error?: string;
   redirectUrl?: string;
-  chargeId?: string;
+  deepLink?: string;
+  ussdCode?: string;
+  instructions?: string;
 }
 
 export interface PaymentProvider {
   name: string;
-  processPayment(invoiceId: string, amount: number, metadata: Record<string, string>): Promise<PaymentResult>;
+  generatePaymentLink(
+    amount: number,
+    vendorPhone: string,
+    reference: string,
+    metadata?: Record<string, string>
+  ): Promise<PaymentResult>;
 }
 
-function getBictorysBaseUrl() {
-  const publicKey = process.env.BICTORYS_PUBLIC_KEY || "";
-  if (publicKey.startsWith("test_")) {
-    return "https://api.test.bictorys.com";
-  }
-  return "https://api.bictorys.com";
-}
+// ============================================================================
+// WAVE PAYMENT
+// Deep link: wave://send?phone=221XXXXXXXXX&amount=XXXXX
+// Fallback web: https://pay.wave.com/m/phone?a=amount (pour les QR)
+// ============================================================================
+class WaveProvider implements PaymentProvider {
+  name = "wave";
 
-function getBictorysHeaders() {
-  return {
-    "Content-Type": "application/json",
-    "X-Api-Key": process.env.BICTORYS_PUBLIC_KEY || "",
-  };
-}
-
-function getAppHost() {
-  // Custom domain from environment
-  if (process.env.APP_DOMAIN) {
-    return `https://${process.env.APP_DOMAIN}`;
-  }
-  // Production domain
-  if (process.env.NODE_ENV === "production") {
-    return "https://livepay.tech";
-  }
-  // Development
-  return "http://localhost:5000";
-}
-
-async function createBictorysCheckout(
-  amount: number,
-  invoiceToken: string,
-  clientName: string,
-  clientPhone: string,
-  clientEmail: string,
-  paymentType?: string
-): Promise<PaymentResult> {
-  try {
-    const baseUrl = getBictorysBaseUrl();
-    const appHost = getAppHost();
-
-    const url = paymentType && paymentType !== "checkout"
-      ? `${baseUrl}/pay/v1/charges?payment_type=${paymentType}`
-      : `${baseUrl}/pay/v1/charges`;
-
-    const payload: any = {
-      amount,
-      currency: "XOF",
-      country: "SN",
-      paymentReference: invoiceToken,
-      successRedirectUrl: `${appHost}/pay/${invoiceToken}?status=completed`,
-      errorRedirectUrl: `${appHost}/pay/${invoiceToken}?status=failed`,
-      customer: {
-        name: clientName,
-        phone: clientPhone,
-        email: clientEmail || `${clientPhone.replace(/[^0-9]/g, "")}@livepay.tech`,
-      },
-    };
-
-    const response = await fetch(url, {
-      method: "POST",
-      headers: getBictorysHeaders(),
-      body: JSON.stringify(payload),
-    });
-
-    const data = await response.json();
-
-    if (data.link || data.chargeId || (data.data && data.data.authorization)) {
-      const checkoutLink = data.link || data.data?.authorization?.redirect || "";
-      const chargeId = data.chargeId || data.data?.id?.toString() || "";
-
-      return {
-        success: true,
-        redirectUrl: checkoutLink,
-        chargeId,
-        providerRef: `BIC-${chargeId}`,
-      };
-    }
-
-    console.error("[Bictorys] Checkout creation failed:", data);
+  async generatePaymentLink(
+    amount: number,
+    vendorPhone: string,
+    reference: string,
+    metadata?: Record<string, string>
+  ): Promise<PaymentResult> {
+    // Nettoyer le numéro (enlever espaces, +, etc)
+    const cleanPhone = vendorPhone.replace(/[^0-9]/g, "");
+    
+    // Deep link Wave - ouvre directement l'app avec montant pré-rempli
+    const deepLink = `wave://send?phone=${cleanPhone}&amount=${amount}`;
+    
+    // USSD code pour Wave Sénégal (fallback si pas de smartphone)
+    const ussdCode = `*155*1*${cleanPhone}*${amount}#`;
+    
     return {
-      success: false,
-      error: data.message || "Erreur lors de la creation du paiement",
+      success: true,
+      deepLink,
+      ussdCode,
+      providerRef: `WAVE-${Date.now()}-${reference.slice(0, 8)}`,
+      instructions: `Envoyez ${amount.toLocaleString("fr-FR")} FCFA au ${cleanPhone} via Wave`,
     };
-  } catch (error) {
-    console.error("[Bictorys] API error:", error);
+  }
+}
+
+// ============================================================================
+// ORANGE MONEY PAYMENT
+// Deep link: intent Android ou scheme iOS
+// USSD: #144*1*numero*montant#
+// ============================================================================
+class OrangeMoneyProvider implements PaymentProvider {
+  name = "orange_money";
+
+  async generatePaymentLink(
+    amount: number,
+    vendorPhone: string,
+    reference: string,
+    metadata?: Record<string, string>
+  ): Promise<PaymentResult> {
+    const cleanPhone = vendorPhone.replace(/[^0-9]/g, "");
+    
+    // Deep link Orange Money (format Sénégal/Afrique de l'Ouest)
+    const deepLink = `orangemoney://transfer?recipient=${cleanPhone}&amount=${amount}`;
+    
+    // USSD code pour Orange Money Sénégal
+    const ussdCode = `#144*1*${cleanPhone}*${amount}#`;
+    
     return {
-      success: false,
-      error: "Erreur de connexion au service de paiement",
+      success: true,
+      deepLink,
+      ussdCode,
+      providerRef: `OM-${Date.now()}-${reference.slice(0, 8)}`,
+      instructions: `Envoyez ${amount.toLocaleString("fr-FR")} FCFA au ${cleanPhone} via Orange Money`,
     };
   }
 }
 
-class BictorysProvider implements PaymentProvider {
-  name: string;
-  paymentType: string | undefined;
+// ============================================================================
+// FREE MONEY (Sénégal)
+// Pas de deep link connu - USSD seulement
+// ============================================================================
+class FreeMoneyProvider implements PaymentProvider {
+  name = "free_money";
 
-  constructor(name: string, paymentType?: string) {
-    this.name = name;
-    this.paymentType = paymentType;
-  }
-
-  async processPayment(invoiceId: string, amount: number, metadata: Record<string, string>): Promise<PaymentResult> {
-    return createBictorysCheckout(
-      amount,
-      metadata.invoiceToken || invoiceId,
-      metadata.clientName,
-      metadata.clientPhone,
-      metadata.clientEmail || "",
-      this.paymentType
-    );
+  async generatePaymentLink(
+    amount: number,
+    vendorPhone: string,
+    reference: string,
+    metadata?: Record<string, string>
+  ): Promise<PaymentResult> {
+    const cleanPhone = vendorPhone.replace(/[^0-9]/g, "");
+    
+    // USSD code pour Free Money Sénégal
+    const ussdCode = `#555*1*${cleanPhone}*${amount}#`;
+    
+    return {
+      success: true,
+      deepLink: undefined,
+      ussdCode,
+      providerRef: `FREE-${Date.now()}-${reference.slice(0, 8)}`,
+      instructions: `Composez ${ussdCode} pour envoyer ${amount.toLocaleString("fr-FR")} FCFA au ${cleanPhone}`,
+    };
   }
 }
 
+// ============================================================================
+// MOOV MONEY (Côte d'Ivoire, Bénin, etc)
+// ============================================================================
+class MoovMoneyProvider implements PaymentProvider {
+  name = "moov_money";
+
+  async generatePaymentLink(
+    amount: number,
+    vendorPhone: string,
+    reference: string,
+    metadata?: Record<string, string>
+  ): Promise<PaymentResult> {
+    const cleanPhone = vendorPhone.replace(/[^0-9]/g, "");
+    
+    // USSD Moov Money
+    const ussdCode = `*155*1*${cleanPhone}*${amount}#`;
+    
+    return {
+      success: true,
+      deepLink: undefined,
+      ussdCode,
+      providerRef: `MOOV-${Date.now()}-${reference.slice(0, 8)}`,
+      instructions: `Envoyez ${amount.toLocaleString("fr-FR")} FCFA au ${cleanPhone} via Moov Money`,
+    };
+  }
+}
+
+// ============================================================================
+// MTN MOBILE MONEY
+// ============================================================================
+class MTNMomoProvider implements PaymentProvider {
+  name = "mtn_momo";
+
+  async generatePaymentLink(
+    amount: number,
+    vendorPhone: string,
+    reference: string,
+    metadata?: Record<string, string>
+  ): Promise<PaymentResult> {
+    const cleanPhone = vendorPhone.replace(/[^0-9]/g, "");
+    
+    // Deep link MTN MoMo
+    const deepLink = `mtn://transfer?phone=${cleanPhone}&amount=${amount}`;
+    const ussdCode = `*126*1*${cleanPhone}*${amount}#`;
+    
+    return {
+      success: true,
+      deepLink,
+      ussdCode,
+      providerRef: `MTN-${Date.now()}-${reference.slice(0, 8)}`,
+      instructions: `Envoyez ${amount.toLocaleString("fr-FR")} FCFA au ${cleanPhone} via MTN MoMo`,
+    };
+  }
+}
+
+// ============================================================================
+// CASH PAYMENT (Paiement en espèces à la livraison)
+// ============================================================================
 class CashProvider implements PaymentProvider {
   name = "cash";
 
-  async processPayment(invoiceId: string, amount: number, metadata: Record<string, string>): Promise<PaymentResult> {
-    const ref = `CASH-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  async generatePaymentLink(
+    amount: number,
+    vendorPhone: string,
+    reference: string,
+    metadata?: Record<string, string>
+  ): Promise<PaymentResult> {
     return {
       success: true,
-      providerRef: ref,
+      providerRef: `CASH-${Date.now()}-${reference.slice(0, 8)}`,
+      instructions: `Paiement en espèces: ${amount.toLocaleString("fr-FR")} FCFA à la livraison`,
     };
   }
 }
 
+// ============================================================================
+// Registry des providers
+// ============================================================================
 const providers: Record<string, PaymentProvider> = {
-  wave: new BictorysProvider("wave"),
-  orange_money: new BictorysProvider("orange_money", "orange_money"),
-  card: new BictorysProvider("card", "card"),
+  wave: new WaveProvider(),
+  orange_money: new OrangeMoneyProvider(),
+  free_money: new FreeMoneyProvider(),
+  moov_money: new MoovMoneyProvider(),
+  mtn_momo: new MTNMomoProvider(),
   cash: new CashProvider(),
 };
 
@@ -147,11 +208,62 @@ export function getPaymentProvider(method: string): PaymentProvider | undefined 
   return providers[method];
 }
 
-export function getAvailableProviders(): { id: string; name: string; description: string; icon: string }[] {
+export function getAvailableProviders(): { 
+  id: string; 
+  name: string; 
+  description: string; 
+  icon: string;
+  color: string;
+  countries: string[];
+}[] {
   return [
-    { id: "wave", name: "Wave", description: "Paiement mobile Wave", icon: "wave" },
-    { id: "orange_money", name: "Orange Money", description: "Paiement mobile Orange", icon: "orange" },
-    { id: "card", name: "Carte bancaire", description: "Visa / Mastercard", icon: "card" },
-    { id: "cash", name: "Especes", description: "Paiement en main propre", icon: "cash" },
+    { 
+      id: "wave", 
+      name: "Wave", 
+      description: "Paiement mobile Wave",
+      icon: "wave",
+      color: "#1DC4F9",
+      countries: ["SN", "CI", "ML", "BF", "GM"]
+    },
+    { 
+      id: "orange_money", 
+      name: "Orange Money", 
+      description: "Paiement mobile Orange",
+      icon: "orange",
+      color: "#FF6600",
+      countries: ["SN", "CI", "ML", "BF", "CM", "MG"]
+    },
+    { 
+      id: "free_money", 
+      name: "Free Money", 
+      description: "Paiement mobile Free",
+      icon: "free",
+      color: "#E31937",
+      countries: ["SN"]
+    },
+    { 
+      id: "moov_money", 
+      name: "Moov Money", 
+      description: "Paiement mobile Moov",
+      icon: "moov",
+      color: "#0066B3",
+      countries: ["CI", "BJ", "TG", "NE"]
+    },
+    { 
+      id: "mtn_momo", 
+      name: "MTN MoMo", 
+      description: "Paiement mobile MTN",
+      icon: "mtn",
+      color: "#FFCC00",
+      countries: ["CI", "CM", "BJ", "GH", "UG"]
+    },
+    { 
+      id: "cash", 
+      name: "Espèces", 
+      description: "Paiement à la livraison",
+      icon: "cash",
+      color: "#22C55E",
+      countries: ["ALL"]
+    },
   ];
 }
